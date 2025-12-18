@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic
+asyncpg
+openfga-sdk
+python-dotenv
+httpx
+

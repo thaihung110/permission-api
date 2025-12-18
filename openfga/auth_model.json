@@ -1,0 +1,1252 @@
+{
+  "schema_version": "1.2",
+  "type_definitions": [
+    {
+      "metadata": {
+        "module": "",
+        "relations": {
+          "can_change_ownership": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_commit": { "directly_related_user_types": [], "module": "" },
+          "can_control_tasks": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_drop": { "directly_related_user_types": [], "module": "" },
+          "can_get_metadata": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_get_tasks": { "directly_related_user_types": [], "module": "" },
+          "can_grant_describe": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_manage_grants": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_modify": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_pass_grants": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_select": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_include_in_list": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_read_assignments": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_read_data": { "directly_related_user_types": [], "module": "" },
+          "can_rename": { "directly_related_user_types": [], "module": "" },
+          "can_set_protection": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_undrop": { "directly_related_user_types": [], "module": "" },
+          "can_write_data": { "directly_related_user_types": [], "module": "" },
+          "describe": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "manage_grants": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "modify": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "ownership": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "parent": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "namespace" }
+            ],
+            "module": ""
+          },
+          "pass_grants": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "select": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          }
+        }
+      },
+      "relations": {
+        "can_change_ownership": {
+          "computedUserset": { "object": "", "relation": "manage_grants" }
+        },
+        "can_commit": {
+          "computedUserset": { "object": "", "relation": "modify" }
+        },
+        "can_control_tasks": {
+          "computedUserset": { "object": "", "relation": "modify" }
+        },
+        "can_drop": {
+          "computedUserset": { "object": "", "relation": "modify" }
+        },
+        "can_get_metadata": {
+          "computedUserset": { "object": "", "relation": "describe" }
+        },
+        "can_get_tasks": {
+          "computedUserset": { "object": "", "relation": "describe" }
+        },
+        "can_grant_describe": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": { "object": "", "relation": "manage_grants" }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "describe"
+                      }
+                    },
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "pass_grants"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "can_grant_manage_grants": {
+          "computedUserset": { "object": "", "relation": "manage_grants" }
+        },
+        "can_grant_modify": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": { "object": "", "relation": "manage_grants" }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": { "object": "", "relation": "modify" }
+                    },
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "pass_grants"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "can_grant_pass_grants": {
+          "computedUserset": { "object": "", "relation": "manage_grants" }
+        },
+        "can_grant_select": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": { "object": "", "relation": "manage_grants" }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": { "object": "", "relation": "select" }
+                    },
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "pass_grants"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "can_include_in_list": {
+          "computedUserset": { "object": "", "relation": "can_get_metadata" }
+        },
+        "can_read_assignments": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_grant_pass_grants"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_grant_manage_grants"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_grant_describe"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_grant_select"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_grant_modify"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_change_ownership"
+                }
+              }
+            ]
+          }
+        },
+        "can_read_data": {
+          "computedUserset": { "object": "", "relation": "select" }
+        },
+        "can_rename": {
+          "computedUserset": { "object": "", "relation": "modify" }
+        },
+        "can_set_protection": {
+          "computedUserset": { "object": "", "relation": "modify" }
+        },
+        "can_undrop": {
+          "computedUserset": { "object": "", "relation": "modify" }
+        },
+        "can_write_data": {
+          "computedUserset": { "object": "", "relation": "modify" }
+        },
+        "describe": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } },
+              { "computedUserset": { "object": "", "relation": "select" } },
+              {
+                "tupleToUserset": {
+                  "computedUserset": { "object": "", "relation": "describe" },
+                  "tupleset": { "object": "", "relation": "parent" }
+                }
+              }
+            ]
+          }
+        },
+        "manage_grants": {
+          "union": {
+            "child": [
+              { "this": {} },
+              {
+                "difference": {
+                  "base": {
+                    "computedUserset": { "object": "", "relation": "ownership" }
+                  },
+                  "subtract": {
+                    "tupleToUserset": {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "managed_access_inheritance"
+                      },
+                      "tupleset": { "object": "", "relation": "parent" }
+                    }
+                  }
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "object": "",
+                    "relation": "manage_grants"
+                  },
+                  "tupleset": { "object": "", "relation": "parent" }
+                }
+              }
+            ]
+          }
+        },
+        "modify": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } },
+              {
+                "tupleToUserset": {
+                  "computedUserset": { "object": "", "relation": "modify" },
+                  "tupleset": { "object": "", "relation": "parent" }
+                }
+              }
+            ]
+          }
+        },
+        "ownership": { "this": {} },
+        "parent": { "this": {} },
+        "pass_grants": { "this": {} },
+        "select": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } },
+              { "computedUserset": { "object": "", "relation": "modify" } },
+              {
+                "tupleToUserset": {
+                  "computedUserset": { "object": "", "relation": "select" },
+                  "tupleset": { "object": "", "relation": "parent" }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "type": "table"
+    },
+    {
+      "metadata": {
+        "module": "",
+        "relations": {
+          "can_change_ownership": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_create_namespace": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_create_table": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_create_view": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_delete": { "directly_related_user_types": [], "module": "" },
+          "can_get_metadata": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_create": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_describe": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_manage_grants": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_modify": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_pass_grants": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_select": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_include_in_list": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_list_everything": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_list_namespaces": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_list_tables": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_list_views": { "directly_related_user_types": [], "module": "" },
+          "can_read_assignments": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_set_managed_access": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_set_protection": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_update_properties": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "child": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "namespace" },
+              { "condition": "", "type": "table" }
+            ],
+            "module": ""
+          },
+          "create": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "describe": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "manage_grants": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "managed_access": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user", "wildcard": {} },
+              { "condition": "", "type": "role", "wildcard": {} }
+            ],
+            "module": ""
+          },
+          "managed_access_inheritance": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "modify": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "ownership": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "parent": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "namespace" },
+              { "condition": "", "type": "catalog" }
+            ],
+            "module": ""
+          },
+          "pass_grants": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "select": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          }
+        }
+      },
+      "relations": {
+        "can_change_ownership": {
+          "computedUserset": { "object": "", "relation": "manage_grants" }
+        },
+        "can_create_namespace": {
+          "computedUserset": { "object": "", "relation": "create" }
+        },
+        "can_create_table": {
+          "computedUserset": { "object": "", "relation": "create" }
+        },
+        "can_create_view": {
+          "computedUserset": { "object": "", "relation": "create" }
+        },
+        "can_delete": {
+          "computedUserset": { "object": "", "relation": "modify" }
+        },
+        "can_get_metadata": {
+          "union": {
+            "child": [
+              { "computedUserset": { "object": "", "relation": "describe" } },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "object": "",
+                    "relation": "can_get_metadata"
+                  },
+                  "tupleset": { "object": "", "relation": "child" }
+                }
+              }
+            ]
+          }
+        },
+        "can_grant_create": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": { "object": "", "relation": "manage_grants" }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": { "object": "", "relation": "create" }
+                    },
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "pass_grants"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "can_grant_describe": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": { "object": "", "relation": "manage_grants" }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "describe"
+                      }
+                    },
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "pass_grants"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "can_grant_manage_grants": {
+          "computedUserset": { "object": "", "relation": "manage_grants" }
+        },
+        "can_grant_modify": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": { "object": "", "relation": "manage_grants" }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": { "object": "", "relation": "modify" }
+                    },
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "pass_grants"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "can_grant_pass_grants": {
+          "computedUserset": { "object": "", "relation": "manage_grants" }
+        },
+        "can_grant_select": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": { "object": "", "relation": "manage_grants" }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": { "object": "", "relation": "select" }
+                    },
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "pass_grants"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "can_include_in_list": {
+          "computedUserset": { "object": "", "relation": "can_get_metadata" }
+        },
+        "can_list_everything": {
+          "computedUserset": { "object": "", "relation": "describe" }
+        },
+        "can_list_namespaces": {
+          "computedUserset": { "object": "", "relation": "can_get_metadata" }
+        },
+        "can_list_tables": {
+          "computedUserset": { "object": "", "relation": "can_get_metadata" }
+        },
+        "can_list_views": {
+          "computedUserset": { "object": "", "relation": "can_get_metadata" }
+        },
+        "can_read_assignments": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_grant_create"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_grant_describe"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_grant_modify"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_grant_select"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_grant_pass_grants"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_grant_manage_grants"
+                }
+              },
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "can_change_ownership"
+                }
+              }
+            ]
+          }
+        },
+        "can_set_managed_access": {
+          "computedUserset": { "object": "", "relation": "manage_grants" }
+        },
+        "can_set_protection": {
+          "computedUserset": { "object": "", "relation": "modify" }
+        },
+        "can_update_properties": {
+          "computedUserset": { "object": "", "relation": "modify" }
+        },
+        "child": { "this": {} },
+        "create": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } },
+              {
+                "tupleToUserset": {
+                  "computedUserset": { "object": "", "relation": "create" },
+                  "tupleset": { "object": "", "relation": "parent" }
+                }
+              }
+            ]
+          }
+        },
+        "describe": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } },
+              { "computedUserset": { "object": "", "relation": "select" } },
+              { "computedUserset": { "object": "", "relation": "create" } },
+              {
+                "tupleToUserset": {
+                  "computedUserset": { "object": "", "relation": "describe" },
+                  "tupleset": { "object": "", "relation": "parent" }
+                }
+              }
+            ]
+          }
+        },
+        "manage_grants": {
+          "union": {
+            "child": [
+              { "this": {} },
+              {
+                "difference": {
+                  "base": {
+                    "computedUserset": { "object": "", "relation": "ownership" }
+                  },
+                  "subtract": {
+                    "tupleToUserset": {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "managed_access_inheritance"
+                      },
+                      "tupleset": { "object": "", "relation": "parent" }
+                    }
+                  }
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "object": "",
+                    "relation": "manage_grants"
+                  },
+                  "tupleset": { "object": "", "relation": "parent" }
+                }
+              }
+            ]
+          }
+        },
+        "managed_access": { "this": {} },
+        "managed_access_inheritance": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "object": "",
+                  "relation": "managed_access"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "object": "",
+                    "relation": "managed_access_inheritance"
+                  },
+                  "tupleset": { "object": "", "relation": "parent" }
+                }
+              }
+            ]
+          }
+        },
+        "modify": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } },
+              {
+                "tupleToUserset": {
+                  "computedUserset": { "object": "", "relation": "modify" },
+                  "tupleset": { "object": "", "relation": "parent" }
+                }
+              }
+            ]
+          }
+        },
+        "ownership": { "this": {} },
+        "parent": { "this": {} },
+        "pass_grants": { "this": {} },
+        "select": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } },
+              { "computedUserset": { "object": "", "relation": "modify" } },
+              {
+                "tupleToUserset": {
+                  "computedUserset": { "object": "", "relation": "select" },
+                  "tupleset": { "object": "", "relation": "parent" }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "type": "namespace"
+    },
+    {
+      "metadata": {
+        "module": "",
+        "relations": {
+          "assignee": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "can_assume": { "directly_related_user_types": [], "module": "" },
+          "can_change_ownership": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_delete": { "directly_related_user_types": [], "module": "" },
+          "can_grant_assignee": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_update": { "directly_related_user_types": [], "module": "" },
+          "ownership": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          }
+        }
+      },
+      "relations": {
+        "assignee": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } }
+            ]
+          }
+        },
+        "can_assume": {
+          "union": {
+            "child": [
+              { "computedUserset": { "object": "", "relation": "assignee" } },
+              { "computedUserset": { "object": "", "relation": "ownership" } }
+            ]
+          }
+        },
+        "can_change_ownership": {
+          "computedUserset": { "object": "", "relation": "can_grant_assignee" }
+        },
+        "can_delete": {
+          "computedUserset": { "object": "", "relation": "can_grant_assignee" }
+        },
+        "can_grant_assignee": {
+          "computedUserset": { "object": "", "relation": "ownership" }
+        },
+        "can_update": {
+          "computedUserset": { "object": "", "relation": "can_grant_assignee" }
+        },
+        "ownership": { "this": {} }
+      },
+      "type": "role"
+    },
+    {
+      "metadata": {
+        "module": "",
+        "relations": {
+          "can_change_ownership": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_create_namespace": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_delete": { "directly_related_user_types": [], "module": "" },
+          "can_get_metadata": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_create": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_describe": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_manage_grants": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_modify": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_pass_grants": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_grant_select": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_include_in_list": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_list_everything": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_list_namespaces": {
+            "directly_related_user_types": [],
+            "module": ""
+          },
+          "can_use": { "directly_related_user_types": [], "module": "" },
+          "create": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "describe": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "manage_grants": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "modify": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "namespace": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "namespace" }
+            ],
+            "module": ""
+          },
+          "ownership": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "pass_grants": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "select": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          }
+        }
+      },
+      "relations": {
+        "can_change_ownership": {
+          "computedUserset": { "object": "", "relation": "manage_grants" }
+        },
+        "can_create_namespace": {
+          "computedUserset": { "object": "", "relation": "create" }
+        },
+        "can_delete": {
+          "computedUserset": { "object": "", "relation": "modify" }
+        },
+        "can_get_metadata": {
+          "union": {
+            "child": [
+              { "computedUserset": { "object": "", "relation": "describe" } },
+              {
+                "tupleToUserset": {
+                  "computedUserset": {
+                    "object": "",
+                    "relation": "can_get_metadata"
+                  },
+                  "tupleset": { "object": "", "relation": "namespace" }
+                }
+              }
+            ]
+          }
+        },
+        "can_grant_create": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": { "object": "", "relation": "manage_grants" }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": { "object": "", "relation": "create" }
+                    },
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "pass_grants"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "can_grant_describe": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": { "object": "", "relation": "manage_grants" }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "describe"
+                      }
+                    },
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "pass_grants"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "can_grant_manage_grants": {
+          "computedUserset": { "object": "", "relation": "manage_grants" }
+        },
+        "can_grant_modify": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": { "object": "", "relation": "manage_grants" }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": { "object": "", "relation": "modify" }
+                    },
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "pass_grants"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "can_grant_pass_grants": {
+          "computedUserset": { "object": "", "relation": "manage_grants" }
+        },
+        "can_grant_select": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": { "object": "", "relation": "manage_grants" }
+              },
+              {
+                "intersection": {
+                  "child": [
+                    {
+                      "computedUserset": { "object": "", "relation": "select" }
+                    },
+                    {
+                      "computedUserset": {
+                        "object": "",
+                        "relation": "pass_grants"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "can_include_in_list": {
+          "computedUserset": { "object": "", "relation": "can_get_metadata" }
+        },
+        "can_list_everything": {
+          "computedUserset": { "object": "", "relation": "describe" }
+        },
+        "can_list_namespaces": {
+          "computedUserset": { "object": "", "relation": "can_get_metadata" }
+        },
+        "can_use": {
+          "computedUserset": { "object": "", "relation": "can_get_metadata" }
+        },
+        "create": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } }
+            ]
+          }
+        },
+        "describe": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } },
+              { "computedUserset": { "object": "", "relation": "select" } },
+              { "computedUserset": { "object": "", "relation": "create" } }
+            ]
+          }
+        },
+        "manage_grants": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } }
+            ]
+          }
+        },
+        "modify": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } }
+            ]
+          }
+        },
+        "namespace": { "this": {} },
+        "ownership": { "this": {} },
+        "pass_grants": { "this": {} },
+        "select": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "object": "", "relation": "ownership" } },
+              { "computedUserset": { "object": "", "relation": "modify" } }
+            ]
+          }
+        }
+      },
+      "type": "catalog"
+    },
+    {
+      "metadata": {
+        "module": "",
+        "relations": {
+          "mask": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          },
+          "parent": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "table" }
+            ],
+            "module": ""
+          },
+          "select": {
+            "directly_related_user_types": [
+              { "condition": "", "type": "user" },
+              { "condition": "", "relation": "assignee", "type": "role" }
+            ],
+            "module": ""
+          }
+        }
+      },
+      "relations": {
+        "mask": { "this": {} },
+        "parent": { "this": {} },
+        "select": {
+          "union": {
+            "child": [
+              { "this": {} },
+              {
+                "tupleToUserset": {
+                  "computedUserset": { "object": "", "relation": "select" },
+                  "tupleset": { "object": "", "relation": "parent" }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "type": "column"
+    },
+    { "relations": {}, "type": "user" }
+  ]
+}

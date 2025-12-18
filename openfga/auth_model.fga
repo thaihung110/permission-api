@@ -1,0 +1,113 @@
+model
+  schema 1.2
+
+type table # module: lakekeeper-table, file: components/table.fga
+  relations
+    define can_change_ownership: manage_grants
+    define can_commit: modify
+    define can_control_tasks: modify
+    define can_drop: modify
+    define can_get_metadata: describe
+    define can_get_tasks: describe
+    define can_grant_describe: manage_grants or (describe and pass_grants)
+    define can_grant_manage_grants: manage_grants
+    define can_grant_modify: manage_grants or (modify and pass_grants)
+    define can_grant_pass_grants: manage_grants
+    define can_grant_select: manage_grants or (select and pass_grants)
+    define can_include_in_list: can_get_metadata
+    define can_read_assignments: can_grant_pass_grants or can_grant_manage_grants or can_grant_describe or can_grant_select or can_grant_modify or can_change_ownership
+    define can_read_data: select
+    define can_rename: modify
+    define can_set_protection: modify
+    define can_undrop: modify
+    define can_write_data: modify
+    define describe: [user, role#assignee] or ownership or select or describe from parent
+    define manage_grants: [user, role#assignee] or (ownership but not managed_access_inheritance from parent) or manage_grants from parent
+    define modify: [user, role#assignee] or ownership or modify from parent
+    define ownership: [user, role#assignee]
+    define parent: [namespace]
+    define pass_grants: [user, role#assignee]
+    define select: [user, role#assignee] or ownership or modify or select from parent
+
+type namespace # module: lakekeeper-namespace, file: components/namespace.fga
+  relations
+    define can_change_ownership: manage_grants
+    define can_create_namespace: create
+    define can_create_table: create
+    define can_create_view: create
+    define can_delete: modify
+    define can_get_metadata: describe or can_get_metadata from child
+    define can_grant_create: manage_grants or (create and pass_grants)
+    define can_grant_describe: manage_grants or (describe and pass_grants)
+    define can_grant_manage_grants: manage_grants
+    define can_grant_modify: manage_grants or (modify and pass_grants)
+    define can_grant_pass_grants: manage_grants
+    define can_grant_select: manage_grants or (select and pass_grants)
+    define can_include_in_list: can_get_metadata
+    define can_list_everything: describe
+    define can_list_namespaces: can_get_metadata
+    define can_list_tables: can_get_metadata
+    define can_list_views: can_get_metadata
+    define can_read_assignments: can_grant_create or can_grant_describe or can_grant_modify or can_grant_select or can_grant_pass_grants or can_grant_manage_grants or can_change_ownership
+    define can_set_managed_access: manage_grants
+    define can_set_protection: modify
+    define can_update_properties: modify
+    define child: [namespace, table]
+    define create: [user, role#assignee] or ownership or create from parent
+    define describe: [user, role#assignee] or ownership or select or create or describe from parent
+    define manage_grants: [user, role#assignee] or (ownership but not managed_access_inheritance from parent) or manage_grants from parent
+    define managed_access: [user:*, role:*]
+    define managed_access_inheritance: managed_access or managed_access_inheritance from parent
+    define modify: [user, role#assignee] or ownership or modify from parent
+    define ownership: [user, role#assignee]
+    # Parent can be another namespace, or a catalog (for Trino catalogs).
+    define parent: [namespace, catalog]
+    define pass_grants: [user, role#assignee]
+    define select: [user, role#assignee] or ownership or modify or select from parent
+
+
+type role # module: lakekeeper-role, file: components/role.fga
+  relations
+    define assignee: [user, role#assignee] or ownership
+    define can_assume: assignee or ownership
+    define can_change_ownership: can_grant_assignee
+    define can_delete: can_grant_assignee
+    define can_grant_assignee: ownership
+    define can_update: can_grant_assignee
+    define ownership: [user, role#assignee]
+    
+# Catalog-level permissions for Trino catalogs
+type catalog # module: lakekeeper-catalog, logical Trino catalog
+  relations
+    define can_change_ownership: manage_grants
+    define can_create_namespace: create
+    define can_delete: modify
+    define can_get_metadata: describe or can_get_metadata from namespace
+    define can_grant_create: manage_grants or (create and pass_grants)
+    define can_grant_describe: manage_grants or (describe and pass_grants)
+    define can_grant_manage_grants: manage_grants
+    define can_grant_modify: manage_grants or (modify and pass_grants)
+    define can_grant_pass_grants: manage_grants
+    define can_grant_select: manage_grants or (select and pass_grants)
+    define can_include_in_list: can_get_metadata
+    define can_list_everything: describe
+    define can_list_namespaces: can_get_metadata
+    define can_use: can_get_metadata
+    define create: [user, role#assignee] or ownership
+    define describe: [user, role#assignee] or ownership or select or create
+    define manage_grants: [user, role#assignee] or ownership
+    define modify: [user, role#assignee] or ownership
+    define namespace: [namespace]
+    define ownership: [user, role#assignee]
+    define pass_grants: [user, role#assignee]
+    define select: [user, role#assignee] or ownership or modify
+
+type column # module: lakekeeper-column, column-level masking
+  relations
+    define parent: [table]
+    define select: [user, role#assignee] or select from parent
+    # Relation used for explicit masking (mask-by-tuple; default is unmasked)
+    define mask: [user, role#assignee]
+
+type user # module: user, file: components/user.fga
+

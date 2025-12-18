@@ -1,0 +1,90 @@
+services:
+  openfga-db-2:
+    image: postgres:16
+    container_name: openfga-db-2
+    environment:
+      - POSTGRES_USER=openfga_admin
+      - POSTGRES_PASSWORD=openfga_password
+      - POSTGRES_DB=openfga_db
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - openfga-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openfga_admin -p 5432 -d openfga_db"]
+      interval: 20s
+      timeout: 20s
+      retries: 2
+      start_period: 10s
+    ports:
+      # Expose Postgres for debugging/inspection (optional)
+      - "5433:5432"
+    networks:
+      - lakehouse-network
+
+  openfga-migrate-2:
+    image: openfga/openfga:v1.8.0
+    container_name: openfga-migrate-2
+    command: migrate
+    environment:
+      - OPENFGA_DATASTORE_ENGINE=postgres
+      - OPENFGA_DATASTORE_URI=postgres://openfga_admin:openfga_password@openfga-db-2:5432/openfga_db?sslmode=disable
+    depends_on:
+      openfga-db-2:
+        condition: service_healthy
+    networks:
+      - lakehouse-network
+
+  openfga-2:
+    image: openfga/openfga:v1.8.0
+    container_name: openfga-2
+    command: run
+    environment:
+      - OPENFGA_DATASTORE_ENGINE=postgres
+      - OPENFGA_DATASTORE_URI=postgres://openfga_admin:openfga_password@openfga-db-2:5432/openfga_db?sslmode=disable
+      - OPENFGA_DATASTORE_MAX_OPEN_CONNS=50
+      - OPENFGA_PLAYGROUND_ENABLED=true
+      - OPENFGA_HTTP_ADDR=0.0.0.0:8080
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=openfga-2:8081"]
+      interval: 5s
+      timeout: 30s
+      retries: 3
+      start_period: 10s
+    ports:
+      - "3334:3000" # Playground UI
+      - "8085:8080" # HTTP API
+      - "8089:8081" # gRPC API (healthcheck, etc.)
+    depends_on:
+      openfga-db-2:
+        condition: service_healthy
+      openfga-migrate-2:
+        condition: service_completed_successfully
+    networks:
+      - lakehouse-network
+
+  permission-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: permission-api
+    environment:
+      - OPENFGA_API_URL=http://openfga-2:8080
+      - OPENFGA_STORE_ID=${OPENFGA_STORE_ID:-}
+      - PORT=8000
+      - HOST=0.0.0.0
+    ports:
+      - "8001:8000"
+    depends_on:
+      openfga-2:
+        condition: service_healthy
+    networks:
+      - lakehouse-network
+    restart: unless-stopped
+
+volumes:
+  openfga-db-data:
+
+networks:
+  lakehouse-network:
+    name: lakehouse-network
+    external: true
