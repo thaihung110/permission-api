@@ -61,4 +61,3 @@ USER_TYPE_PREFIX = "user"
 
 # Special catalog for system-level permissions
 SYSTEM_CATALOG = "system"
-

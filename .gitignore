@@ -62,3 +62,4 @@ dmypy.json
 # Docker
 *.tar
 
+policies/
