@@ -63,3 +63,6 @@ dmypy.json
 *.tar
 
 policies/
+
+docs/row-filtering-final-design.md
+docs/row-filtering-implementation-plan.md
