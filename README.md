@@ -6,8 +6,6 @@ Authorization service for Lakekeeper resources using OpenFGA.
 
 ```
 Trino → OPA → Permission API → OpenFGA
-                     ↓
-               Lakekeeper DB
 ```
 
 ## Features

@@ -307,12 +307,32 @@ class PermissionService:
         # Build user identifier
         user = build_user_identifier(grant.user_id)
 
-        # Grant permission in OpenFGA
-        await self.openfga.grant_permission(user, grant.relation, object_id)
+        # Prepare condition dict if provided
+        condition_dict = None
+        if grant.condition:
+            condition_dict = {
+                "name": grant.condition.name,
+                "context": grant.condition.context.model_dump(),
+            }
+            logger.info(
+                f"Granting permission with condition: user={user}, relation={grant.relation}, "
+                f"object={object_id}, condition={grant.condition.name}"
+            )
 
-        logger.info(
-            f"Permission granted: user={user}, relation={grant.relation}, object={object_id}"
+        # Grant permission in OpenFGA
+        await self.openfga.grant_permission(
+            user, grant.relation, object_id, condition=condition_dict
         )
+
+        if grant.condition:
+            logger.info(
+                f"Permission granted with condition: user={user}, relation={grant.relation}, "
+                f"object={object_id}, condition={grant.condition.name}"
+            )
+        else:
+            logger.info(
+                f"Permission granted: user={user}, relation={grant.relation}, object={object_id}"
+            )
 
         return PermissionGrantResponse(
             success=True,

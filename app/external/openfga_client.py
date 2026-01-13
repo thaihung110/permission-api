@@ -3,7 +3,7 @@ OpenFGA client management and operations
 """
 
 import logging
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from openfga_sdk.client import ClientConfiguration, OpenFgaClient
 from openfga_sdk.client.models import ClientCheckRequest, ClientWriteRequest
@@ -117,7 +117,13 @@ class OpenFGAManager:
             logger.error(f"Error checking permission in OpenFGA: {e}")
             return False
 
-    async def grant_permission(self, user: str, relation: str, object_id: str):
+    async def grant_permission(
+        self,
+        user: str,
+        relation: str,
+        object_id: str,
+        condition: Optional[Dict[str, Any]] = None,
+    ):
         """
         Grant permission by writing tuple to OpenFGA
 
@@ -125,29 +131,55 @@ class OpenFGAManager:
             user: User identifier
             relation: Relation/permission
             object_id: Object identifier
+            condition: Optional condition dict with 'name' and 'context' keys
+                Example: {
+                    "name": "has_attribute_access",
+                    "context": {
+                        "attribute_name": "region",
+                        "allowed_values": ["mien_bac"]
+                    }
+                }
         """
         if not self.client:
             raise RuntimeError("OpenFGA client not initialized")
 
         try:
             # Create tuple using SDK model
-            tuple_item = ClientTuple(
-                user=user, relation=relation, object=object_id
-            )
+            tuple_kwargs = {
+                "user": user,
+                "relation": relation,
+                "object": object_id,
+            }
+
+            # Add condition if provided
+            if condition:
+                tuple_kwargs["condition"] = condition
+                logger.info(
+                    f"Writing tuple with condition: user={user}, relation={relation}, "
+                    f"object={object_id}, condition={condition.get('name')}"
+                )
+            else:
+                logger.info(
+                    f"Writing tuple to OpenFGA: user={user}, relation={relation}, object={object_id}"
+                )
+
+            tuple_item = ClientTuple(**tuple_kwargs)
 
             # Create write request
             body = ClientWriteRequest(writes=[tuple_item])
 
-            logger.info(
-                f"Writing tuple to OpenFGA: user={user}, relation={relation}, object={object_id}"
-            )
-
             response = await self.client.write(body)
             logger.debug(f"OpenFGA write response: {response}")
 
-            logger.info(
-                f"Granted permission: user={user}, relation={relation}, object={object_id}"
-            )
+            if condition:
+                logger.info(
+                    f"Granted permission with condition: user={user}, relation={relation}, "
+                    f"object={object_id}, condition={condition.get('name')}"
+                )
+            else:
+                logger.info(
+                    f"Granted permission: user={user}, relation={relation}, object={object_id}"
+                )
 
         except Exception as e:
             # Some OpenFGA/SDK combinations may raise even though the tuple was
@@ -213,4 +245,64 @@ class OpenFGAManager:
 
         except Exception as e:
             logger.error(f"Error revoking permission in OpenFGA: {e}")
+            raise
+
+    # ========================================================================
+    # Tuple Reading Operations
+    # ========================================================================
+
+    async def read_tuples(
+        self,
+        user: Optional[str] = None,
+        relation: Optional[str] = None,
+        object_id: Optional[str] = None,
+    ) -> list:
+        """
+        Read tuples from OpenFGA matching the given filters
+
+        Args:
+            user: User identifier (optional, e.g., "user:alice")
+            relation: Relation to filter by (optional, e.g., "viewer")
+            object_id: Object identifier to filter by (optional, e.g., "row_filter_policy:customers_region_filter")
+
+        Returns:
+            List of tuples with condition context (deserialized from bytea by SDK)
+
+        Note:
+            Condition context is stored as bytea in OpenFGA but automatically
+            deserialized by the SDK when reading tuples.
+        """
+        if not self.client:
+            raise RuntimeError("OpenFGA client not initialized")
+
+        try:
+            # Use read() method - OpenFGA SDK read() accepts tuple_key as keyword arguments
+            # Build tuple_key dict with only non-None values
+            tuple_key = {}
+            if user is not None:
+                tuple_key["user"] = user
+            if relation is not None:
+                tuple_key["relation"] = relation
+            if object_id is not None:
+                tuple_key["object"] = object_id
+
+            # Call read() with tuple_key parameter
+            response = await self.client.read(
+                tuple_key=tuple_key if tuple_key else None
+            )
+
+            tuples = []
+            if hasattr(response, "tuples") and response.tuples:
+                for tuple_item in response.tuples:
+                    tuples.append(tuple_item)
+
+            logger.debug(
+                f"OpenFGA read: user={user}, relation={relation}, "
+                f"object={object_id}, found {len(tuples)} tuples"
+            )
+
+            return tuples
+
+        except Exception as e:
+            logger.error(f"Error reading tuples from OpenFGA: {e}")
             raise

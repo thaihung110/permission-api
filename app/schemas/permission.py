@@ -2,7 +2,7 @@
 Permission-related Pydantic schemas
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -71,6 +71,30 @@ class PermissionCheckResponse(BaseModel):
         json_schema_extra = {"example": {"allowed": True}}
 
 
+class ConditionContext(BaseModel):
+    """Condition context for row filtering"""
+
+    attribute_name: str = Field(
+        ..., description="Attribute name (e.g., 'region', 'department')"
+    )
+    allowed_values: List[str] = Field(
+        ...,
+        description="List of allowed values (e.g., ['mien_bac', 'mien_trung'])",
+    )
+
+
+class ConditionSpec(BaseModel):
+    """Condition specification for tuple with condition context"""
+
+    name: str = Field(
+        ..., description="Condition name (e.g., 'has_attribute_access')"
+    )
+    context: ConditionContext = Field(
+        ...,
+        description="Condition context with attribute_name and allowed_values",
+    )
+
+
 class PermissionGrant(BaseModel):
     """Request model for granting permission"""
 
@@ -81,6 +105,10 @@ class PermissionGrant(BaseModel):
     )
     relation: str = Field(
         ..., description="Relation/permission (e.g., select, ownership, create)"
+    )
+    condition: Optional[ConditionSpec] = Field(
+        None,
+        description="Optional condition context for row filtering (e.g., has_attribute_access)",
     )
 
     class Config:
@@ -106,6 +134,21 @@ class PermissionGrant(BaseModel):
                             "table": "user",
                         },
                         "relation": "select",
+                    },
+                },
+                {
+                    "description": "Row filter policy with condition context",
+                    "value": {
+                        "user_id": "sale_nam",
+                        "resource": {},
+                        "relation": "viewer",
+                        "condition": {
+                            "name": "has_attribute_access",
+                            "context": {
+                                "attribute_name": "region",
+                                "allowed_values": ["mien_bac"],
+                            },
+                        },
                     },
                 },
             ]
