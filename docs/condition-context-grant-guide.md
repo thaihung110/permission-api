@@ -85,7 +85,7 @@ curl -X POST http://localhost:8000/api/v1/permissions/grant \
   }'
 ```
 
-**Note:** Với row filter policy, `resource` có thể rỗng `{}` vì object_id sẽ là `row_filter_policy:customers_region_filter` (cần tạo policy trước).
+**Note:** Với row filter policy, `resource` phải có đầy đủ catalog, schema, table. Hệ thống sẽ tự động build policy ID và tạo policy-to-table link.
 
 **OpenFGA Tuple được tạo:**
 
@@ -178,45 +178,9 @@ curl -X POST http://localhost:8000/api/v1/permissions/grant \
 
 ## 🔄 Complete Flow: Setup Row Filtering
 
-### Step 1: Tạo Policy Link với Table
+### Step 1: Grant User Access với Condition Context (Tự động tạo Policy Link)
 
-Trước tiên, cần tạo tuple link policy với table:
-
-```bash
-# Link policy với table
-curl -X POST http://localhost:8000/api/v1/permissions/grant \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user": "table:lakekeeper_bronze.finance.customers",
-    "relation": "applies_to",
-    "object": "row_filter_policy:customers_region_filter"
-  }'
-```
-
-**Note:** Hiện tại endpoint `/permissions/grant` không hỗ trợ trực tiếp format này. Bạn cần dùng OpenFGA API trực tiếp hoặc implement admin endpoint.
-
-**Alternative:** Dùng OpenFGA API trực tiếp:
-
-```bash
-curl -X POST http://localhost:8080/stores/{store_id}/write \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer {token}" \
-  -d '{
-    "writes": {
-      "tuple_keys": [
-        {
-          "user": "table:lakekeeper_bronze.finance.customers",
-          "relation": "applies_to",
-          "object": "row_filter_policy:customers_region_filter"
-        }
-      ]
-    }
-  }'
-```
-
-### Step 2: Grant User Access với Condition Context
-
-Sau khi có policy link, grant user access với condition:
+Grant user access với condition. Hệ thống sẽ tự động tạo policy-to-table link nếu chưa có:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/permissions/grant \
@@ -235,17 +199,29 @@ curl -X POST http://localhost:8000/api/v1/permissions/grant \
   }'
 ```
 
-**Note:** Với row filter policy, bạn cần build object_id là `row_filter_policy:customers_region_filter`. Hiện tại endpoint tự động build từ resource, nên bạn cần sửa logic hoặc dùng OpenFGA API trực tiếp.
+**Note:** Hệ thống tự động build policy ID `user_region_filter` từ table name và attribute name, và tự động tạo policy-to-table link.
 
 ---
 
-## ⚠️ Limitations Hiện Tại
+## ✅ Tự động hóa
 
-1. **Row Filter Policy Object ID:** Endpoint `/permissions/grant` tự động build object_id từ resource (catalog, schema, table). Với row filter policy, object_id cần là `row_filter_policy:{policy_id}`, không phải từ resource.
+Hệ thống tự động xử lý row filtering khi detect:
 
-2. **Workaround:**
-   - Dùng OpenFGA API trực tiếp để tạo tuple với object_id là `row_filter_policy:...`
-   - Hoặc implement admin endpoint riêng cho row filter policies
+- `relation = "viewer"`
+- `condition.name = "has_attribute_access"`
+- Resource có đầy đủ catalog, schema, table
+
+**Tự động:**
+
+1. Build policy ID: `{table_name}_{attribute_name}_filter`
+2. Tạo policy-to-table link (nếu chưa có)
+3. Grant user permission với condition context
+
+**Không cần:**
+
+- Tạo policy-to-table link thủ công
+- Specify policy_id trong request
+- Dùng OpenFGA API trực tiếp
 
 ---
 
@@ -353,12 +329,13 @@ curl -X POST http://localhost:8000/permissions/row-filter \
 - Support `has_attribute_access` condition với `attribute_name` và `allowed_values`
 - Backward compatible: condition là optional field
 
-⚠️ **Cần lưu ý:**
+✅ **Đã hoàn thiện:**
 
-- Với row filter policy, object_id cần là `row_filter_policy:{policy_id}`, không phải từ resource
-- Hiện tại cần dùng OpenFGA API trực tiếp hoặc implement admin endpoint riêng
+- Tự động detect row filtering khi có condition context với relation "viewer"
+- Tự động build policy ID từ table name và attribute name
+- Tự động tạo policy-to-table link
+- Backward compatible: không ảnh hưởng đến grant permission thông thường
 
-🚀 **Next Steps:**
+📚 **Tài liệu liên quan:**
 
-- Implement admin endpoint cho row filter policies
-- Hoặc mở rộng `/permissions/grant` để hỗ trợ row filter policy object_id
+- `docs/row-filtering-grant-fix.md` - Chi tiết về fix và cách sử dụng

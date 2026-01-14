@@ -186,74 +186,76 @@ class PermissionService:
                 f"table={table_name}, columns={columns}, operation={operation}"
             )
 
-            # For table operations, check schema permission first
+            # For table operations, check DIRECT schema permission first (not inherited)
             if table_name and schema_name and catalog_name:
                 # Build schema object ID
                 schema_object_id = f"namespace:{catalog_name}.{schema_name}"
 
                 logger.info(
-                    f"Hierarchical check - First checking schema: user={user}, relation={relation}, schema={schema_object_id}"
+                    f"Hierarchical check - First checking DIRECT schema permission: user={user}, relation={relation}, schema={schema_object_id}"
                 )
 
-                # Check schema permission
-                schema_allowed = await self.openfga.check_permission(
+                # Check DIRECT schema permission (excludes inheritance from catalog)
+                schema_allowed = await self.openfga.check_direct_permission(
                     user, relation, schema_object_id
                 )
 
                 if not schema_allowed:
                     logger.warning(
-                        f"Schema permission denied: user={user}, schema={schema_object_id}, relation={relation}"
+                        f"Direct schema permission denied: user={user}, schema={schema_object_id}, relation={relation}"
                     )
                     return False
 
                 logger.info(
-                    f"Schema permission granted: user={user}, schema={schema_object_id}"
+                    f"Direct schema permission granted: user={user}, schema={schema_object_id}"
                 )
 
-            # Check the target resource permission (table)
+            # Check DIRECT permission on target resource (table) - excludes inheritance
             logger.info(
-                f"Checking target resource: user={user}, relation={relation}, object={object_id}"
+                f"Checking DIRECT target resource permission: user={user}, relation={relation}, object={object_id}"
             )
 
-            allowed = await self.openfga.check_permission(
+            allowed = await self.openfga.check_direct_permission(
                 user, relation, object_id
             )
 
             if not allowed:
                 logger.warning(
-                    f"Table permission denied: user={user}, table={object_id}, relation={relation}"
+                    f"Direct table permission denied: user={user}, table={object_id}, relation={relation}"
                 )
                 return False
 
             logger.info(
-                f"Table permission granted: user={user}, table={object_id}"
+                f"Direct table permission granted: user={user}, table={object_id}"
             )
 
-            # For SelectFromColumns, check permission on each column
+            # For SelectFromColumns, check DIRECT permission on each column (excludes inheritance)
             if operation == "SelectFromColumns" and columns:
                 logger.info(
-                    f"Checking column permissions for {len(columns)} columns: {columns}"
+                    f"Checking DIRECT column permissions for {len(columns)} columns: {columns}"
                 )
 
                 for column_name in columns:
                     column_object_id = f"column:{catalog_name}.{schema_name}.{table_name}.{column_name}"
 
                     logger.info(
-                        f"Checking column SELECT permission: user={user}, column={column_object_id}"
+                        f"Checking DIRECT column SELECT permission: user={user}, column={column_object_id}"
                     )
 
-                    # Must have 'select' permission on column
-                    column_select_allowed = await self.openfga.check_permission(
-                        user, relation, column_object_id
+                    # Must have DIRECT 'select' permission on column (not inherited from table)
+                    column_select_allowed = (
+                        await self.openfga.check_direct_permission(
+                            user, relation, column_object_id
+                        )
                     )
 
                     if not column_select_allowed:
                         logger.warning(
-                            f"Column SELECT permission denied: user={user}, column={column_object_id}"
+                            f"Direct column SELECT permission denied: user={user}, column={column_object_id}"
                         )
                         return False
 
-                    # Check if column should be masked
+                    # Check if column should be masked (can use check_permission for mask as it's a separate check)
                     column_mask_allowed = await self.openfga.check_permission(
                         user, "mask", column_object_id
                     )
@@ -268,7 +270,7 @@ class PermissionService:
                         )
 
                 logger.info(
-                    f"All column SELECT permissions granted for user={user}"
+                    f"All DIRECT column SELECT permissions granted for user={user}"
                 )
 
             return True
@@ -300,9 +302,29 @@ class PermissionService:
         )
 
         resource = grant.resource
-        object_id, resource_type, resource_id = (
-            self._build_resource_identifiers(resource, grant.relation)
+
+        # Check if this is row filtering (condition with viewer relation)
+        is_row_filtering = (
+            grant.condition is not None
+            and grant.relation == "viewer"
+            and grant.condition.name == "has_attribute_access"
         )
+
+        if is_row_filtering:
+            # Row filtering: build row_filter_policy object_id
+            object_id, resource_type, resource_id = (
+                self._build_row_filter_policy_identifier(
+                    resource, grant.condition.context
+                )
+            )
+
+            # Ensure policy-to-table link exists
+            await self._ensure_policy_table_link(resource, object_id)
+        else:
+            # Regular permission: build normal resource identifier
+            object_id, resource_type, resource_id = (
+                self._build_resource_identifiers(resource, grant.relation)
+            )
 
         # Build user identifier
         user = build_user_identifier(grant.user_id)
@@ -474,3 +496,100 @@ class PermissionService:
             )
 
         return object_id, resource_type, resource_id
+
+    def _build_row_filter_policy_identifier(
+        self, resource, condition_context
+    ) -> Tuple[str, str, str]:
+        """
+        Build row_filter_policy identifier from resource and condition context
+
+        Policy ID format: {table_name}_{attribute_name}_filter
+        Example: "user_region_filter" for table "user" and attribute "region"
+
+        Args:
+            resource: Resource specification (must have catalog, schema, table)
+            condition_context: ConditionContext with attribute_name
+
+        Returns:
+            Tuple of (object_id, resource_type, resource_id)
+
+        Raises:
+            ValueError: If resource or condition context is invalid
+        """
+        # Validate resource has table information
+        schema_name = resource.schema or resource.namespace
+        if not (resource.catalog and schema_name and resource.table):
+            raise ValueError(
+                "Row filter policy requires catalog, schema, and table. "
+                'Example: {"catalog": "lakekeeper_bronze", "schema": "finance", "table": "user"}'
+            )
+
+        # Get attribute name from condition context
+        attribute_name = condition_context.attribute_name
+        if not attribute_name:
+            raise ValueError(
+                "Row filter condition context must include attribute_name. "
+                'Example: {"attribute_name": "region", "allowed_values": ["north"]}'
+            )
+
+        # Build policy ID: {table_name}_{attribute_name}_filter
+        table_name = resource.table
+        policy_id = f"{table_name}_{attribute_name}_filter"
+
+        # Build object_id
+        object_id = f"row_filter_policy:{policy_id}"
+        resource_type = "row_filter_policy"
+        resource_id = policy_id
+
+        logger.info(
+            f"Built row filter policy identifier: policy_id={policy_id}, "
+            f"table={resource.catalog}.{schema_name}.{table_name}, "
+            f"attribute={attribute_name}"
+        )
+
+        return object_id, resource_type, resource_id
+
+    async def _ensure_policy_table_link(self, resource, policy_object_id: str):
+        """
+        Ensure policy-to-table link exists in OpenFGA
+
+        Creates tuple: table:{catalog}.{schema}.{table} --applies_to--> row_filter_policy:{policy_id}
+
+        Args:
+            resource: Resource specification
+            policy_object_id: Policy object ID (e.g., "row_filter_policy:user_region_filter")
+        """
+        try:
+            schema_name = resource.schema or resource.namespace
+            table_fqn = f"{resource.catalog}.{schema_name}.{resource.table}"
+            table_object_id = f"table:{table_fqn}"
+
+            # Check if link already exists
+            existing_tuples = await self.openfga.read_tuples(
+                user=table_object_id,
+                relation="applies_to",
+                object_id=policy_object_id,
+            )
+
+            if existing_tuples:
+                logger.debug(
+                    f"Policy-to-table link already exists: {table_object_id} --applies_to--> {policy_object_id}"
+                )
+                return
+
+            # Create the link
+            await self.openfga.grant_permission(
+                user=table_object_id,
+                relation="applies_to",
+                object_id=policy_object_id,
+            )
+
+            logger.info(
+                f"Created policy-to-table link: {table_object_id} --applies_to--> {policy_object_id}"
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"Error ensuring policy-table link (may already exist): {e}"
+            )
+            # Don't fail the grant if link creation fails - it might already exist

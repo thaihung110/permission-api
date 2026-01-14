@@ -29,9 +29,9 @@ Execution          Decision            Generator         User Attributes
   "object": "row_filter_policy:customers_region_filter"
 }
 
-// User sale_nam chỉ được xem region mien_bac
+// User hung chỉ được xem region mien_bac
 {
-  "user": "user:sale_nam",
+  "user": "user:hung",
   "relation": "viewer",
   "object": "row_filter_policy:customers_region_filter",
   "condition": {
@@ -43,19 +43,6 @@ Execution          Decision            Generator         User Attributes
   }
 }
 
-// User manager được xem nhiều regions
-{
-  "user": "user:manager",
-  "relation": "viewer",
-  "object": "row_filter_policy:customers_region_filter",
-  "condition": {
-    "name": "has_attribute_access",
-    "context": {
-      "attribute_name": "region",
-      "allowed_values": ["mien_bac", "mien_trung", "mien_nam"]
-    }
-  }
-}
 ```
 
 **2. Column Mapping:**
@@ -189,49 +176,196 @@ Permission API thực hiện các bước sau:
 
 ```python
 # Query OpenFGA: Tìm policies áp dụng cho table
-policies = await client.read_tuples(
+# Request: Read all tuples where table is user and relation is "applies_to"
+tuples = await openfga.read_tuples(
     user="table:prod.public.customers",
     relation="applies_to"
 )
-# Result: ["customers_region_filter"]
+# OpenFGA SDK sẽ tự động thêm pattern "row_filter_policy:" vào object filter
+
+# Parse policy IDs from response
+policy_ids = []
+for tuple_item in tuples:
+    object_id = tuple_item.key.object  # e.g., "row_filter_policy:customers_region_filter"
+    if object_id.startswith("row_filter_policy:"):
+        policy_id = object_id.replace("row_filter_policy:", "")
+        policy_ids.append(policy_id)
+
+# Result: policy_ids = ["customers_region_filter"]
 ```
 
-**4.2. Get User's Allowed Values**
+**OpenFGA Request/Response:**
 
-```python
-# Query OpenFGA: Lấy allowed values của user cho policy
-tuples = await client.read_tuples(
-    user="user:sale_nam",
-    relation="viewer",
-    object="row_filter_policy:customers_region_filter"
-)
+```http
+# Request to OpenFGA (via SDK)
+POST /stores/{store_id}/read
+{
+  "tuple_key": {
+    "user": "table:prod.public.customers",
+    "relation": "applies_to",
+    "object": "row_filter_policy:"  # Pattern matching
+  }
+}
 
-# Extract from condition context
-allowed_values = tuples[0].condition.context["allowed_values"]
-# Result: ["mien_bac"]
-
-attribute_name = tuples[0].condition.context["attribute_name"]
-# Result: "region"
+# Response from OpenFGA
+{
+  "tuples": [
+    {
+      "key": {
+        "user": "table:prod.public.customers",
+        "relation": "applies_to",
+        "object": "row_filter_policy:customers_region_filter"
+      }
+    }
+  ]
+}
 ```
 
-**4.3. Extract Column Name from Policy ID**
+**4.2. Get User's Allowed Values (Loop per Policy)**
 
 ```python
-# Parse column name from policy_id using naming convention
-# Format: {table_name}_{column_name}_filter
-policy_id = "customers_region_filter"
-column_name = policy_id.replace("_filter", "").split("_")[-1]
-# Result: column_name = "region"
+# Loop qua từng policy để lấy allowed values của user
+filters = []
+
+for policy_id in policy_ids:  # ["customers_region_filter"]
+    # Query OpenFGA: Lấy tuple của user cho từng policy
+    tuples = await openfga.read_tuples(
+        user="user:sale_nam",
+        relation="viewer",
+        object_id=f"row_filter_policy:{policy_id}"
+    )
+
+    if not tuples:
+        # User không có access đến policy này
+        # Permission API sẽ fail closed - deny all
+        continue
+
+    # Extract condition context từ tuple
+    tuple_item = tuples[0]
+    condition = tuple_item.key.condition
+    ctx = condition.context  # SDK tự động deserialize từ bytea
+
+    # Parse context (có thể là dict hoặc object)
+    if isinstance(ctx, dict):
+        attribute_name = ctx["attribute_name"]  # "region"
+        allowed_values = ctx["allowed_values"]  # ["mien_bac"]
+    else:
+        # Access as object attributes
+        attribute_name = ctx.attribute_name
+        allowed_values = ctx.allowed_values
+
+    # Parse column name from policy_id
+    column_name = parse_column_from_policy_id(policy_id)  # "region"
+
+    filters.append({
+        "policy_id": policy_id,
+        "attribute_name": attribute_name,
+        "column_name": column_name,
+        "allowed_values": allowed_values
+    })
+
+# Result: filters = [
+#   {
+#     "policy_id": "customers_region_filter",
+#     "attribute_name": "region",
+#     "column_name": "region",
+#     "allowed_values": ["mien_bac"]
+#   }
+# ]
+```
+
+**OpenFGA Request/Response:**
+
+```http
+# Request to OpenFGA (via SDK)
+POST /stores/{store_id}/read
+{
+  "tuple_key": {
+    "user": "user:sale_nam",
+    "relation": "viewer",
+    "object": "row_filter_policy:customers_region_filter"
+  }
+}
+
+# Response from OpenFGA
+{
+  "tuples": [
+    {
+      "key": {
+        "user": "user:sale_nam",
+        "relation": "viewer",
+        "object": "row_filter_policy:customers_region_filter",
+        "condition": {
+          "name": "has_attribute_access",
+          "context": {
+            "attribute_name": "region",
+            "allowed_values": ["mien_bac"]
+          }
+        }
+      }
+    }
+  ]
+}
 ```
 
 **Note:** Condition context được OpenFGA lưu dưới dạng bytea (serialized), nhưng khi đọc qua SDK sẽ được deserialize về dạng JSON gốc.
 
+**4.3. Extract Column Name from Policy ID**
+
+```python
+# Function to parse column name from policy_id using naming convention
+# Format: {table_name}_{column_name}_filter
+def parse_column_from_policy_id(policy_id: str) -> str:
+    # Remove "_filter" suffix and get last part
+    parts = policy_id.replace("_filter", "").split("_")
+    return parts[-1]  # Last part is column name
+
+# Example:
+policy_id = "customers_region_filter"
+column_name = parse_column_from_policy_id(policy_id)
+# Result: column_name = "region"
+```
+
 **4.4. Build SQL Filter**
 
 ```python
-# Build SQL WHERE clause
-sql_filter = f"{config.column_name} IN ('{', '.join(allowed_values)}')"
-# Result: "region IN ('mien_bac')"
+# Security check: User phải có access đến TẤT CẢ policies
+if len(filters) < len(policy_ids):
+    # User missing access to some required policies - DENY ALL
+    logger.warning(
+        f"User {user_id} missing access to some policies. "
+        f"Required: {len(policy_ids)}, Found: {len(filters)}"
+    )
+    return "1=0"  # Deny all rows
+
+# Build SQL WHERE clauses from filters
+clauses = []
+
+for f in filters:
+    # Check for wildcard
+    if "*" in f["allowed_values"]:
+        # Skip filter - user has access to all values for this column
+        logger.debug(f"Wildcard detected for policy {f['policy_id']}, skipping filter")
+        continue
+
+    # Escape SQL values to prevent injection
+    values = [escape_sql_value(v) for v in f["allowed_values"]]
+    values_str = "', '".join(values)
+
+    # Build IN clause
+    clauses.append(f"{f['column_name']} IN ('{values_str}')")
+
+# Combine multiple clauses with AND
+if not clauses:
+    # All wildcards - no filter needed
+    sql_filter = None
+elif len(clauses) == 1:
+    sql_filter = clauses[0]
+else:
+    # Multiple policies - combine with AND
+    sql_filter = " AND ".join(clauses)
+
+# Result for this example: "region IN ('mien_bac')"
 ```
 
 **Response to OPA:**
@@ -288,7 +422,7 @@ WHERE region IN ('mien_bac');
 ## 🔄 Sequence Diagram
 
 ```
-┌─────────┐   ┌───────┐   ┌──────────────┐   ┌─────────┐
+┌─────────┐   ┌───────┐   ┌──────────────┐   ┌─────────┐   ┌─────────┐
 │  User   │   │ Trino │   │     OPA      │   │ Perm API│   │ OpenFGA │
 └────┬────┘   └───┬───┘   └──────┬───────┘   └────┬────┘   └────┬────┘
      │            │               │                │             │
@@ -301,10 +435,21 @@ WHERE region IN ('mien_bac');
      │            │               │ Get row filter │             │
      │            │               │───────────────▶│             │
      │            │               │                │             │
-     │            │               │                │ Query tuples│
+     │            │               │                │ 1. Get table│
+     │            │               │                │    policies │
      │            │               │                │────────────▶│
      │            │               │                │             │
-     │            │               │                │ Return tuples
+     │            │               │                │ Return      │
+     │            │               │                │ policy IDs  │
+     │            │               │                │◀────────────│
+     │            │               │                │             │
+     │            │               │                │ 2. Get user │
+     │            │               │                │  permissions│
+     │            │               │                │  (per policy)│
+     │            │               │                │────────────▶│
+     │            │               │                │             │
+     │            │               │                │ Return      │
+     │            │               │                │ allowed vals│
      │            │               │                │◀────────────│
      │            │               │                │             │
      │            │               │  Build SQL     │             │
@@ -339,13 +484,16 @@ SELECT customer_id, name, region FROM prod.public.customers;
 
 **Flow:**
 
-1. Trino → OPA
+1. Trino → OPA: Request authorization
 2. OPA → Permission API: `{"user_id": "sale_nam", "resource": {...}}`
-3. Permission API → OpenFGA: Query tuples
-4. OpenFGA returns: `allowed_values: ["mien_bac"]`
-5. Permission API builds: `region IN ('mien_bac')`
-6. OPA → Trino: `{"rowFilters": [{"expression": "region IN ('mien_bac')"}]}`
-7. Trino executes: `SELECT ... WHERE region IN ('mien_bac')`
+3. Permission API → OpenFGA (Query 1): Get policies for table `prod.public.customers`
+   - Returns: `["customers_region_filter"]`
+4. Permission API → OpenFGA (Query 2): Get user's allowed values for policy `customers_region_filter`
+   - Returns: `allowed_values: ["mien_bac"]`, `attribute_name: "region"`
+5. Permission API builds SQL filter: `region IN ('mien_bac')`
+6. Permission API → OPA: `{"filter_expression": "region IN ('mien_bac')", "has_filter": true}`
+7. OPA → Trino: `{"allow": true, "rowFilters": [{"expression": "region IN ('mien_bac')"}]}`
+8. Trino executes with filter: `SELECT ... WHERE region IN ('mien_bac')`
 
 **Result:**
 
@@ -368,10 +516,13 @@ SELECT COUNT(*) FROM prod.public.customers;
 
 **Flow:**
 
-1. Permission API queries OpenFGA
-2. Returns: `allowed_values: ["mien_bac", "mien_trung", "mien_nam"]`
-3. Builds: `region IN ('mien_bac', 'mien_trung', 'mien_nam')`
-4. Trino executes: `SELECT COUNT(*) WHERE region IN ('mien_bac', 'mien_trung', 'mien_nam')`
+1. Permission API → OpenFGA (Query 1): Get policies for table
+   - Returns: `["customers_region_filter"]`
+2. Permission API → OpenFGA (Query 2): Get user's allowed values
+   - Returns: `allowed_values: ["mien_bac", "mien_trung", "mien_nam"]`
+3. Permission API builds: `region IN ('mien_bac', 'mien_trung', 'mien_nam')`
+4. OPA → Trino: `{"allow": true, "rowFilters": [{"expression": "region IN ('mien_bac', 'mien_trung', 'mien_nam')"}]}`
+5. Trino executes: `SELECT COUNT(*) WHERE region IN ('mien_bac', 'mien_trung', 'mien_nam')`
 
 **Result:**
 
@@ -404,10 +555,15 @@ count
 
 **Flow:**
 
-1. Permission API detects wildcard: `"*" in allowed_values`
-2. Returns: `{"filter_expression": null}`
-3. OPA → Trino: No row filter
-4. Trino executes: `SELECT * FROM customers` (without WHERE clause)
+1. Permission API → OpenFGA (Query 1): Get policies for table
+   - Returns: `["customers_region_filter"]`
+2. Permission API → OpenFGA (Query 2): Get user's allowed values
+   - Returns: `allowed_values: ["*"]`
+3. Permission API detects wildcard: `"*" in allowed_values`
+4. Permission API skips this filter clause (wildcard = all access)
+5. Permission API → OPA: `{"filter_expression": null, "has_filter": false}`
+6. OPA → Trino: `{"allow": true, "rowFilters": []}`
+7. Trino executes: `SELECT * FROM customers` (without WHERE clause)
 
 **Result:** Admin sees ALL customers
 
@@ -419,12 +575,83 @@ count
 
 **Flow:**
 
-1. Permission API queries OpenFGA
-2. No tuples found for user `hacker`
-3. Returns: `{"filter_expression": "1=0"}`
-4. Trino executes: `SELECT * WHERE 1=0`
+1. Permission API → OpenFGA (Query 1): Get policies for table
+   - Returns: `["customers_region_filter"]`
+2. Permission API → OpenFGA (Query 2): Get user's allowed values for policy
+   - Returns: Empty list (no tuples found)
+3. Permission API security check: `len(filters) < len(policy_ids)` → `0 < 1` → FAIL
+4. Permission API → OPA: `{"filter_expression": "1=0", "has_filter": true}`
+5. OPA → Trino: `{"allow": true, "rowFilters": [{"expression": "1=0"}]}`
+6. Trino executes: `SELECT * WHERE 1=0`
 
 **Result:** Empty result set (denied)
+
+---
+
+### Example 5: Multiple Policies (AND Logic)
+
+**Scenario:** Table has 2 policies: `customers_region_filter` and `customers_status_filter`
+
+**Setup:**
+
+```json
+// Policy 1: Filter by region
+{
+  "user": "table:prod.public.customers",
+  "relation": "applies_to",
+  "object": "row_filter_policy:customers_region_filter"
+}
+
+// Policy 2: Filter by status
+{
+  "user": "table:prod.public.customers",
+  "relation": "applies_to",
+  "object": "row_filter_policy:customers_status_filter"
+}
+
+// User access to policy 1
+{
+  "user": "user:analyst",
+  "relation": "viewer",
+  "object": "row_filter_policy:customers_region_filter",
+  "condition": {
+    "name": "has_attribute_access",
+    "context": {
+      "attribute_name": "region",
+      "allowed_values": ["mien_bac", "mien_nam"]
+    }
+  }
+}
+
+// User access to policy 2
+{
+  "user": "user:analyst",
+  "relation": "viewer",
+  "object": "row_filter_policy:customers_status_filter",
+  "condition": {
+    "name": "has_attribute_access",
+    "context": {
+      "attribute_name": "status",
+      "allowed_values": ["active"]
+    }
+  }
+}
+```
+
+**Flow:**
+
+1. Permission API → OpenFGA (Query 1): Get policies for table
+   - Returns: `["customers_region_filter", "customers_status_filter"]`
+2. Permission API loops through policies:
+   - Query 2a: Get allowed values for `customers_region_filter`
+     - Returns: `allowed_values: ["mien_bac", "mien_nam"]`
+   - Query 2b: Get allowed values for `customers_status_filter`
+     - Returns: `allowed_values: ["active"]`
+3. Permission API builds SQL: `region IN ('mien_bac', 'mien_nam') AND status IN ('active')`
+4. OPA → Trino: `{"allow": true, "rowFilters": [{"expression": "region IN ('mien_bac', 'mien_nam') AND status IN ('active')"}]}`
+5. Trino executes: `SELECT * WHERE region IN ('mien_bac', 'mien_nam') AND status IN ('active')`
+
+**Result:** User only sees active customers from North and South regions
 
 ---
 
@@ -598,10 +825,11 @@ INFO: Applying row filter for prod.public.customers: region IN ('mien_bac')
 **3. Permission API Logs:**
 
 ```
-INFO: Building row filter for user=sale_nam, table=prod.public.customers
-INFO: Found policy: customers_region_filter
-INFO: User allowed values: ['mien_bac']
-INFO: Generated filter: region IN ('mien_bac')
+INFO: [ENDPOINT] Received row filter request: user=sale_nam, resource={'catalog_name': 'prod', 'schema_name': 'public', 'table_name': 'customers'}
+DEBUG: Found 1 policies for table prod.public.customers: ['customers_region_filter']
+DEBUG: User sale_nam has access to policy customers_region_filter
+INFO: Built row filter for user=sale_nam, table=prod.public.customers: region IN ('mien_bac')
+INFO: [ENDPOINT] Returning row filter: user=sale_nam, table=prod.public.customers, filter=region IN ('mien_bac'), has_filter=True
 ```
 
 ### Debugging Steps
@@ -630,17 +858,22 @@ INFO: Generated filter: region IN ('mien_bac')
 1. User queries Trino
 2. Trino asks OPA for authorization
 3. OPA calls Permission API for row filter
-4. Permission API queries OpenFGA tuples
-5. Permission API builds SQL filter from user's allowed values
-6. OPA returns filter to Trino
-7. Trino rewrites and executes query with filter
+4. Permission API → OpenFGA (Query 1): Get table policies
+5. Permission API → OpenFGA (Query 2): Get user's allowed values per policy
+6. Permission API builds SQL filter from allowed values (with AND logic for multiple policies)
+7. Permission API → OPA: Returns filter expression
+8. OPA → Trino: Returns authorization decision with row filters
+9. Trino rewrites and executes query with filter
 
 **Key Points:**
 
-- ✅ Filter applied automatically by Trino
-- ✅ User sees only authorized rows
-- ✅ No application code changes needed
-- ✅ Centralized permission management in OpenFGA
-- ✅ Dynamic - no code deploy for permission updates
+- ✅ **Automatic filtering**: Filter applied automatically by Trino, transparent to users
+- ✅ **Fail-closed security**: Users must have access to ALL policies, missing any → deny all (1=0)
+- ✅ **Wildcard support**: Use `["*"]` in allowed_values for unrestricted access
+- ✅ **Multiple policies**: Combine filters with AND logic for fine-grained control
+- ✅ **No application changes**: No code changes needed in data applications
+- ✅ **Centralized management**: All permissions stored in OpenFGA
+- ✅ **Dynamic updates**: Permission changes take effect immediately, no code deploy needed
+- ✅ **Performance**: Row filter evaluated once per query, not per row
 
 This architecture provides **transparent, scalable row-level security** for Trino! 🚀

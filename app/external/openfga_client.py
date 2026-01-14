@@ -5,8 +5,13 @@ OpenFGA client management and operations
 import logging
 from typing import Any, Dict, List, Optional
 
+from openfga_sdk import ReadRequestTupleKey
 from openfga_sdk.client import ClientConfiguration, OpenFgaClient
-from openfga_sdk.client.models import ClientCheckRequest, ClientWriteRequest
+from openfga_sdk.client.models import (
+    ClientCheckRequest,
+    ClientListObjectsRequest,
+    ClientWriteRequest,
+)
 from openfga_sdk.client.models.tuple import ClientTuple
 
 logger = logging.getLogger(__name__)
@@ -82,7 +87,7 @@ class OpenFGAManager:
         self, user: str, relation: str, object_id: str
     ) -> bool:
         """
-        Check if user has permission
+        Check if user has permission (includes inheritance from parent resources)
 
         Args:
             user: User identifier (e.g., "user:alice")
@@ -90,7 +95,7 @@ class OpenFGAManager:
             object_id: Object identifier (e.g., "table:warehouse_id/table_id")
 
         Returns:
-            True if allowed, False otherwise
+            True if allowed (including via inheritance), False otherwise
         """
         if not self.client:
             raise RuntimeError("OpenFGA client not initialized")
@@ -117,6 +122,46 @@ class OpenFGAManager:
             logger.error(f"Error checking permission in OpenFGA: {e}")
             return False
 
+    async def check_direct_permission(
+        self, user: str, relation: str, object_id: str
+    ) -> bool:
+        """
+        Check if user has DIRECT permission (excludes inheritance from parent resources)
+
+        This method checks for explicit tuples only, not inherited permissions.
+        Use this when you need to verify that permission was granted directly
+        on the resource, not inherited from parent (e.g., catalog -> schema -> table).
+
+        Args:
+            user: User identifier (e.g., "user:alice")
+            relation: Relation to check (e.g., "select")
+            object_id: Object identifier (e.g., "table:lakekeeper_bronze.finance.user")
+
+        Returns:
+            True if direct tuple exists, False otherwise (even if inherited permission exists)
+        """
+        if not self.client:
+            raise RuntimeError("OpenFGA client not initialized")
+
+        try:
+            # Read tuples to check for direct permission (not inherited)
+            tuples = await self.read_tuples(
+                user=user, relation=relation, object_id=object_id
+            )
+
+            has_direct_permission = len(tuples) > 0
+
+            logger.debug(
+                f"OpenFGA direct check: user={user}, relation={relation}, "
+                f"object={object_id}, has_direct={has_direct_permission}"
+            )
+
+            return has_direct_permission
+
+        except Exception as e:
+            logger.error(f"Error checking direct permission in OpenFGA: {e}")
+            return False
+
     async def grant_permission(
         self,
         user: str,
@@ -126,6 +171,8 @@ class OpenFGAManager:
     ):
         """
         Grant permission by writing tuple to OpenFGA
+
+        If tuple already exists, it will be overwritten (delete + write in single request)
 
         Args:
             user: User identifier
@@ -144,7 +191,27 @@ class OpenFGAManager:
             raise RuntimeError("OpenFGA client not initialized")
 
         try:
-            # Create tuple using SDK model
+            # Check if tuple already exists (to overwrite it)
+            existing_tuples = await self.read_tuples(
+                user=user, relation=relation, object_id=object_id
+            )
+
+            # If tuple exists, delete it first (separate request to avoid duplicate error)
+            if existing_tuples:
+                logger.info(
+                    f"Tuple already exists, deleting before overwrite: user={user}, relation={relation}, object={object_id}"
+                )
+
+                # Delete existing tuple in separate request
+                delete_tuple = ClientTuple(
+                    user=user, relation=relation, object=object_id
+                )
+
+                delete_body = ClientWriteRequest(deletes=[delete_tuple])
+                await self.client.write(delete_body)
+                logger.debug(f"Deleted existing tuple successfully")
+
+            # Now write the new tuple (with or without condition)
             tuple_kwargs = {
                 "user": user,
                 "relation": relation,
@@ -163,12 +230,11 @@ class OpenFGAManager:
                     f"Writing tuple to OpenFGA: user={user}, relation={relation}, object={object_id}"
                 )
 
-            tuple_item = ClientTuple(**tuple_kwargs)
+            new_tuple = ClientTuple(**tuple_kwargs)
+            write_body = ClientWriteRequest(writes=[new_tuple])
 
-            # Create write request
-            body = ClientWriteRequest(writes=[tuple_item])
-
-            response = await self.client.write(body)
+            # Execute write
+            response = await self.client.write(write_body)
             logger.debug(f"OpenFGA write response: {response}")
 
             if condition:
@@ -182,38 +248,7 @@ class OpenFGAManager:
                 )
 
         except Exception as e:
-            # Some OpenFGA/SDK combinations may raise even though the tuple was
-            # actually written. Treat this as a soft error and verify first.
-            logger.warning(
-                "Initial error while granting permission in OpenFGA: %s. "
-                "Verifying if tuple was still written...",
-                e,
-            )
-
-            try:
-                check_result = await self.check_permission(
-                    user, relation, object_id
-                )
-            except Exception as verify_err:
-                # Verification itself failed – log the original error as real
-                logger.error(
-                    "Error verifying tuple after OpenFGA write failure. "
-                    "original_error=%s verify_error=%s",
-                    e,
-                    verify_err,
-                )
-                raise
-
-            if check_result:
-                # Tuple exists – suppress the exception and treat as success.
-                logger.info(
-                    "Tuple was written successfully despite OpenFGA/SDK "
-                    "error. Suppressing error."
-                )
-                return
-
-            # Tuple does not exist – propagate as a real error.
-            logger.error("Error granting permission in OpenFGA: %s", e)
+            logger.error(f"Error granting permission in OpenFGA: {e}")
             raise
 
     async def revoke_permission(self, user: str, relation: str, object_id: str):
@@ -276,20 +311,37 @@ class OpenFGAManager:
             raise RuntimeError("OpenFGA client not initialized")
 
         try:
-            # Use read() method - OpenFGA SDK read() accepts tuple_key as keyword arguments
-            # Build tuple_key dict with only non-None values
-            tuple_key = {}
+            # Use ReadRequestTupleKey object - OpenFGA SDK read() accepts ReadRequestTupleKey
+            # When querying by user and relation only, we need to provide object type
+            # For pattern matching, we can use object type without id (e.g., "row_filter_policy:")
+            read_request_kwargs = {}
             if user is not None:
-                tuple_key["user"] = user
+                read_request_kwargs["user"] = user
             if relation is not None:
-                tuple_key["relation"] = relation
+                read_request_kwargs["relation"] = relation
             if object_id is not None:
-                tuple_key["object"] = object_id
+                read_request_kwargs["object"] = object_id
+            # If only user and relation provided (no object_id), use object type pattern
+            # OpenFGA requires object type field when querying by user and relation
+            elif user is not None and relation is not None:
+                # For applies_to relation, we expect row_filter_policy objects
+                if relation == "applies_to":
+                    # Pattern: "row_filter_policy:" matches all row_filter_policy objects
+                    read_request_kwargs["object"] = "row_filter_policy:"
+                # For viewer relation with user, we're querying user's permissions on policies
+                elif relation == "viewer" and user.startswith("user:"):
+                    # Pattern: "row_filter_policy:" matches all row_filter_policy objects
+                    read_request_kwargs["object"] = "row_filter_policy:"
+                else:
+                    # For other relations, try to infer object type or use wildcard
+                    # Default to empty string - OpenFGA will handle pattern matching
+                    read_request_kwargs["object"] = ""
 
-            # Call read() with tuple_key parameter
-            response = await self.client.read(
-                tuple_key=tuple_key if tuple_key else None
-            )
+            # Create ReadRequestTupleKey object
+            read_request = ReadRequestTupleKey(**read_request_kwargs)
+
+            # Call read() with ReadRequestTupleKey object
+            response = await self.client.read(read_request)
 
             tuples = []
             if hasattr(response, "tuples") and response.tuples:
@@ -305,4 +357,61 @@ class OpenFGAManager:
 
         except Exception as e:
             logger.error(f"Error reading tuples from OpenFGA: {e}")
+            raise
+
+    async def list_objects(
+        self,
+        user: str,
+        relation: str,
+        object_type: str,
+    ) -> List[str]:
+        """
+        List all objects of a given type that the user has the relation with
+
+        This is more efficient than read_tuples when you only need object IDs.
+
+        Args:
+            user: User identifier (e.g., "table:lakekeeper_bronze.finance.user")
+            relation: Relation to filter by (e.g., "applies_to")
+            object_type: Object type (e.g., "row_filter_policy")
+
+        Returns:
+            List of object IDs (e.g., ["row_filter_policy:user_region_filter"])
+
+        Example:
+            objects = await openfga.list_objects(
+                user="table:lakekeeper_bronze.finance.user",
+                relation="applies_to",
+                object_type="row_filter_policy"
+            )
+            # Returns: ["row_filter_policy:user_region_filter"]
+        """
+        if not self.client:
+            raise RuntimeError("OpenFGA client not initialized")
+
+        try:
+            # Create ClientListObjectsRequest
+            body = ClientListObjectsRequest(
+                user=user,
+                relation=relation,
+                type=object_type,
+            )
+
+            # Call list_objects
+            response = await self.client.list_objects(body)
+
+            # Extract object IDs from response
+            objects = []
+            if hasattr(response, "objects") and response.objects:
+                objects = list(response.objects)
+
+            logger.debug(
+                f"OpenFGA list_objects: user={user}, relation={relation}, "
+                f"type={object_type}, found {len(objects)} objects"
+            )
+
+            return objects
+
+        except Exception as e:
+            logger.error(f"Error listing objects from OpenFGA: {e}")
             raise

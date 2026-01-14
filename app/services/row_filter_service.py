@@ -78,10 +78,14 @@ class RowFilterService:
 
             policy_ids = []
             for tuple_item in tuples:
-                if tuple_item.object.startswith("row_filter_policy:"):
-                    policy_id = tuple_item.object.replace(
-                        "row_filter_policy:", ""
-                    )
+                # OpenFGA SDK: object is in tuple_item.key.object
+                tuple_key = getattr(tuple_item, "key", None)
+                if not tuple_key:
+                    continue
+
+                object_id = getattr(tuple_key, "object", "")
+                if object_id.startswith("row_filter_policy:"):
+                    policy_id = object_id.replace("row_filter_policy:", "")
                     policy_ids.append(policy_id)
 
             logger.debug(
@@ -127,19 +131,51 @@ class RowFilterService:
                     continue
 
                 for tuple_item in tuples:
-                    # Condition context is deserialized from bytea by SDK
-                    if (
-                        not tuple_item.condition
-                        or not tuple_item.condition.context
-                    ):
+                    # OpenFGA SDK: condition is in tuple_item.key.condition
+                    tuple_key = getattr(tuple_item, "key", None)
+                    if not tuple_key:
                         logger.warning(
-                            f"Tuple for user {user_id} and policy {policy_id} has no condition context"
+                            f"Tuple for user {user_id} and policy {policy_id} has no key"
                         )
                         continue
 
-                    ctx = tuple_item.condition.context
-                    attribute_name = ctx.get("attribute_name")
-                    allowed_values = ctx.get("allowed_values", [])
+                    condition = getattr(tuple_key, "condition", None)
+                    if not condition:
+                        logger.warning(
+                            f"Tuple for user {user_id} and policy {policy_id} has no condition"
+                        )
+                        continue
+
+                    ctx = getattr(condition, "context", None)
+                    if not ctx:
+                        logger.warning(
+                            f"Tuple condition for user {user_id} and policy {policy_id} has no context"
+                        )
+                        continue
+
+                    # Extract attribute_name and allowed_values from context
+                    # Context should be a dict with attribute_name and allowed_values
+                    if isinstance(ctx, dict):
+                        attribute_name = ctx.get("attribute_name")
+                        allowed_values = ctx.get("allowed_values", [])
+                    else:
+                        # Try to access as object attributes
+                        attribute_name = getattr(ctx, "attribute_name", None)
+                        allowed_values = getattr(ctx, "allowed_values", [])
+                        # If still None, try to convert to dict
+                        if attribute_name is None:
+                            try:
+                                ctx_dict = (
+                                    dict(ctx)
+                                    if hasattr(ctx, "__iter__")
+                                    else {}
+                                )
+                                attribute_name = ctx_dict.get("attribute_name")
+                                allowed_values = ctx_dict.get(
+                                    "allowed_values", []
+                                )
+                            except Exception:
+                                pass
 
                     if not attribute_name or not allowed_values:
                         logger.warning(
@@ -212,6 +248,42 @@ class RowFilterService:
 
             # Build SQL clauses
             clauses = []
+
+            for f in filters:
+                # Check wildcard
+                if "*" in f["allowed_values"]:
+                    logger.debug(
+                        f"Wildcard detected for user {user_id}, policy {f['policy_id']}, skipping filter"
+                    )
+                    continue  # Skip this filter
+
+                # Build SQL IN clause
+                values = [escape_sql_value(v) for v in f["allowed_values"]]
+                values_str = "', '".join(values)
+                clauses.append(f"{f['column_name']} IN ('{values_str}')")
+
+            if not clauses:
+                # All wildcards - no filter needed
+                logger.debug(
+                    f"All filters are wildcards for user {user_id} and table {table_fqn}"
+                )
+                return None
+
+            # Combine with AND
+            result = " AND ".join(clauses) if len(clauses) > 1 else clauses[0]
+
+            logger.info(
+                f"Built row filter for user={user_id}, table={table_fqn}: {result}"
+            )
+            return result
+
+        except Exception as e:
+            logger.error(
+                f"Error building row filter for user {user_id} and table {table_fqn}: {e}",
+                exc_info=True,
+            )
+            # Fail closed - deny all on error
+            return "1=0"
 
             for f in filters:
                 # Check wildcard
