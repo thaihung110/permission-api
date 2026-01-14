@@ -40,7 +40,9 @@ async def lifespan(app: FastAPI):
 
         # Path to authorization model file
         auth_model_path = (
-            Path(__file__).parent.parent / "openfga" / "auth_model.fga"
+            Path(__file__).parent.parent
+            / "openfga"
+            / "auth_model_row_filter.fga"
         )
 
         # Ensure store and model exist

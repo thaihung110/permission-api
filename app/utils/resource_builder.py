@@ -85,4 +85,3 @@ def build_object_id_from_resource(
 
     # If we reach here, we don't have enough information to build an object_id.
     return None
-
