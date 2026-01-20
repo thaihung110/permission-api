@@ -18,7 +18,7 @@ from app.utils.operation_mapper import (
     build_user_identifier,
     map_operation_to_relation,
 )
-from app.utils.resource_builder import build_object_id_from_resource
+from app.utils.resource_builder import build_resource_identifiers
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,11 @@ class PermissionService:
     ) -> PermissionCheckResponse:
         """
         Check if user has permission to perform operation on resource
+
+        Implements hierarchical permission checking:
+        - Catalog permissions apply to schemas and tables within
+        - Schema permissions apply to tables within
+        - Table permissions apply to columns within (via FGA model)
 
         This is called by OPA to validate Trino queries.
 
@@ -64,11 +69,13 @@ class PermissionService:
                 return PermissionCheckResponse(allowed=False)
 
             # 2. Build OpenFGA object ID directly from request (no DB resolution)
-            object_id = build_object_id_from_resource(
-                request_data.resource, request_data.operation
+            result = build_resource_identifiers(
+                request_data.resource,
+                request_data.operation,
+                raise_on_error=False,
             )
 
-            if not object_id:
+            if not result:
                 # Special handling for operations that require specific resources
                 if request_data.operation == "CreateSchema":
                     logger.warning(
@@ -84,202 +91,192 @@ class PermissionService:
                     )
                 return PermissionCheckResponse(allowed=False)
 
+            # Extract identifiers from result tuple
+            object_id, resource_type, resource_id = result
+
             # 3. Build user identifier
             user = build_user_identifier(request_data.user_id)
 
-            # 4. Check permission in OpenFGA with hierarchical checking
-            # For table operations, check both schema and table permissions
-            allowed = await self._check_permission_hierarchical(
-                user,
-                relation,
-                object_id,
-                request_data.resource,
-                request_data.operation,
+            # 4. Hierarchical permission checking
+            # Check permission in order: catalog -> schema -> table
+            # If permission exists at any level, allow access
+
+            # Column-level permissions are inherited from table in FGA model
+            # EXCEPT for 'mask' relation which is column-specific
+            # So we redirect column checks to table level for all other relations
+            if resource_type == "column" and relation != "mask":
+                logger.info(
+                    f"Column-level {relation} check: redirecting to table level "
+                    f"(column {relation} inherits from table in FGA model)"
+                )
+                # Extract table object_id from column resource
+                # column format: column:catalog.schema.table.column
+                # we need: table:catalog.schema.table
+                parts = resource_id.split(".")
+                if len(parts) >= 4:
+                    catalog_name, schema_name, table_name = (
+                        parts[0],
+                        parts[1],
+                        parts[2],
+                    )
+                    object_id = (
+                        f"table:{catalog_name}.{schema_name}.{table_name}"
+                    )
+                    resource_type = "table"
+                    resource_id = f"{catalog_name}.{schema_name}.{table_name}"
+                else:
+                    logger.warning(
+                        f"Invalid column resource_id format: {resource_id}"
+                    )
+                    return PermissionCheckResponse(allowed=False)
+
+            # Check at the target resource level first
+            allowed = await self.openfga.check_permission(
+                user, relation, object_id
             )
 
+            if allowed:
+                logger.info(
+                    f"Permission check: ALLOWED at {resource_type} level for user={request_data.user_id}"
+                )
+                return PermissionCheckResponse(allowed=True)
+
+            # Special case: AccessCatalog operation
+            # If user doesn't have explicit permission on catalog object,
+            # check if they have ANY permission on ANY resource within this catalog
+            # (e.g., permissions on schemas or tables in this catalog)
+            if (
+                request_data.operation == "AccessCatalog"
+                and resource_type == "catalog"
+            ):
+                catalog_name = resource_id
+                logger.info(
+                    f"AccessCatalog denied at catalog level, checking for any permissions "
+                    f"within catalog {catalog_name}"
+                )
+
+                # Check if user has permissions on any schema or table in this catalog
+                # We'll check for common relations: select, describe, modify, create
+                try:
+                    for check_relation in [
+                        "select",
+                        "describe",
+                        "modify",
+                        "create",
+                    ]:
+                        # Check schemas in this catalog
+                        try:
+                            schema_objects = await self.openfga.list_objects(
+                                user=user,
+                                relation=check_relation,
+                                object_type="schema",
+                            )
+                            # Check if any schema belongs to this catalog
+                            for schema_obj in schema_objects:
+                                # schema format: schema:catalog.schema
+                                if schema_obj.startswith(
+                                    f"schema:{catalog_name}."
+                                ):
+                                    logger.info(
+                                        f"AccessCatalog: ALLOWED - user has {check_relation} "
+                                        f"on {schema_obj} in catalog {catalog_name}"
+                                    )
+                                    return PermissionCheckResponse(allowed=True)
+                        except Exception as e:
+                            logger.debug(
+                                f"No {check_relation} permission found on schemas: {e}"
+                            )
+
+                        # Check tables in this catalog
+                        try:
+                            table_objects = await self.openfga.list_objects(
+                                user=user,
+                                relation=check_relation,
+                                object_type="table",
+                            )
+                            # Check if any table belongs to this catalog
+                            for table_obj in table_objects:
+                                # table format: table:catalog.schema.table
+                                if table_obj.startswith(
+                                    f"table:{catalog_name}."
+                                ):
+                                    logger.info(
+                                        f"AccessCatalog: ALLOWED - user has {check_relation} "
+                                        f"on {table_obj} in catalog {catalog_name}"
+                                    )
+                                    return PermissionCheckResponse(allowed=True)
+                        except Exception as e:
+                            logger.debug(
+                                f"No {check_relation} permission found on tables: {e}"
+                            )
+
+                    logger.info(
+                        f"AccessCatalog: DENIED - no permissions found in catalog {catalog_name}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Error checking catalog-level permissions: {e}, denying"
+                    )
+
+            # If not allowed at target level, check hierarchically at parent levels
+            # Table -> check schema -> check catalog
+            if resource_type == "table":
+                parts = resource_id.split(".")
+                if len(parts) >= 3:
+                    catalog_name, schema_name = parts[0], parts[1]
+
+                    # Check schema level
+                    schema_object_id = f"schema:{catalog_name}.{schema_name}"
+                    allowed = await self.openfga.check_permission(
+                        user, relation, schema_object_id
+                    )
+
+                    if allowed:
+                        logger.info(
+                            f"Permission check: ALLOWED at schema level (hierarchical) for user={request_data.user_id}"
+                        )
+                        return PermissionCheckResponse(allowed=True)
+
+                    # Check catalog level
+                    catalog_object_id = f"catalog:{catalog_name}"
+                    allowed = await self.openfga.check_permission(
+                        user, relation, catalog_object_id
+                    )
+
+                    if allowed:
+                        logger.info(
+                            f"Permission check: ALLOWED at catalog level (hierarchical) for user={request_data.user_id}"
+                        )
+                        return PermissionCheckResponse(allowed=True)
+
+            # Schema -> check catalog
+            elif resource_type == "schema":
+                parts = resource_id.split(".")
+                if len(parts) >= 2:
+                    catalog_name = parts[0]
+
+                    # Check catalog level
+                    catalog_object_id = f"catalog:{catalog_name}"
+                    allowed = await self.openfga.check_permission(
+                        user, relation, catalog_object_id
+                    )
+
+                    if allowed:
+                        logger.info(
+                            f"Permission check: ALLOWED at catalog level (hierarchical) for user={request_data.user_id}"
+                        )
+                        return PermissionCheckResponse(allowed=True)
+
+            # If we get here, permission denied at all levels
             logger.info(
-                f"Permission check result: allowed={allowed} for user={request_data.user_id}"
+                f"Permission check: DENIED at all levels for user={request_data.user_id}"
             )
-
-            return PermissionCheckResponse(allowed=allowed)
+            return PermissionCheckResponse(allowed=False)
 
         except Exception as e:
             logger.error(f"Error checking permission: {e}", exc_info=True)
             # Fail closed - deny on error
             return PermissionCheckResponse(allowed=False)
-
-    async def _check_permission_hierarchical(
-        self,
-        user: str,
-        relation: str,
-        object_id: str,
-        resource: dict,
-        operation: str,
-    ) -> bool:
-        """
-        Check permission hierarchically - check parent resources first
-
-        For table operations with columns, this checks:
-        1. Schema (namespace) permission
-        2. Table permission
-        3. Column permissions (for SelectFromColumns operation)
-
-        All checks must pass for the operation to be allowed.
-
-        Args:
-            user: User identifier
-            relation: OpenFGA relation
-            object_id: Target object ID
-            resource: Resource dict from request
-            operation: Operation name
-
-        Returns:
-            True if all hierarchical checks pass
-        """
-        try:
-            # Extract resource components
-            # Handle both flat structure and nested table structure
-            table_resource = resource.get("table")
-
-            # Check if we have nested structure (table is a dict with catalogName, etc.)
-            if table_resource and isinstance(table_resource, dict):
-                # Nested structure from Trino (e.g., from mask check)
-                catalog_name = table_resource.get("catalogName")
-                schema_name = table_resource.get("schemaName")
-                table_name = table_resource.get("tableName")
-                columns = table_resource.get("columns", [])
-            else:
-                # Flat structure (direct keys from OPA build_resource)
-                catalog_name = resource.get("catalog_name") or resource.get(
-                    "catalog"
-                )
-                schema_name = resource.get("schema_name") or resource.get(
-                    "schema"
-                )
-                table_name = resource.get("table_name") or resource.get("table")
-                columns = resource.get("columns", [])
-
-            # For MaskColumn operation, check mask permission on the specific column
-            if operation == "MaskColumn":
-                logger.info(
-                    f"Checking MASK permission on column: user={user}, relation={relation}, column={object_id}"
-                )
-
-                allowed = await self.openfga.check_permission(
-                    user, relation, object_id
-                )
-
-                if not allowed:
-                    logger.info(
-                        f"Column MASK permission denied (no mask applied): user={user}, column={object_id}"
-                    )
-                    return False
-
-                logger.info(
-                    f"Column MASK permission granted (mask will be applied): user={user}, column={object_id}"
-                )
-                return True
-
-            # Debug: Log extracted values
-            logger.info(
-                f"Extracted resource components: catalog={catalog_name}, schema={schema_name}, "
-                f"table={table_name}, columns={columns}, operation={operation}"
-            )
-
-            # For table operations, check DIRECT schema permission first (not inherited)
-            if table_name and schema_name and catalog_name:
-                # Build schema object ID
-                schema_object_id = f"namespace:{catalog_name}.{schema_name}"
-
-                logger.info(
-                    f"Hierarchical check - First checking DIRECT schema permission: user={user}, relation={relation}, schema={schema_object_id}"
-                )
-
-                # Check DIRECT schema permission (excludes inheritance from catalog)
-                schema_allowed = await self.openfga.check_direct_permission(
-                    user, relation, schema_object_id
-                )
-
-                if not schema_allowed:
-                    logger.warning(
-                        f"Direct schema permission denied: user={user}, schema={schema_object_id}, relation={relation}"
-                    )
-                    return False
-
-                logger.info(
-                    f"Direct schema permission granted: user={user}, schema={schema_object_id}"
-                )
-
-            # Check DIRECT permission on target resource (table) - excludes inheritance
-            logger.info(
-                f"Checking DIRECT target resource permission: user={user}, relation={relation}, object={object_id}"
-            )
-
-            allowed = await self.openfga.check_direct_permission(
-                user, relation, object_id
-            )
-
-            if not allowed:
-                logger.warning(
-                    f"Direct table permission denied: user={user}, table={object_id}, relation={relation}"
-                )
-                return False
-
-            logger.info(
-                f"Direct table permission granted: user={user}, table={object_id}"
-            )
-
-            # For SelectFromColumns, check DIRECT permission on each column (excludes inheritance)
-            if operation == "SelectFromColumns" and columns:
-                logger.info(
-                    f"Checking DIRECT column permissions for {len(columns)} columns: {columns}"
-                )
-
-                for column_name in columns:
-                    column_object_id = f"column:{catalog_name}.{schema_name}.{table_name}.{column_name}"
-
-                    logger.info(
-                        f"Checking DIRECT column SELECT permission: user={user}, column={column_object_id}"
-                    )
-
-                    # Must have DIRECT 'select' permission on column (not inherited from table)
-                    column_select_allowed = (
-                        await self.openfga.check_direct_permission(
-                            user, relation, column_object_id
-                        )
-                    )
-
-                    if not column_select_allowed:
-                        logger.warning(
-                            f"Direct column SELECT permission denied: user={user}, column={column_object_id}"
-                        )
-                        return False
-
-                    # Check if column should be masked (can use check_permission for mask as it's a separate check)
-                    column_mask_allowed = await self.openfga.check_permission(
-                        user, "mask", column_object_id
-                    )
-
-                    if column_mask_allowed:
-                        logger.info(
-                            f"Column permission: user={user}, column={column_name} - SELECT granted, MASK enabled (data will be masked)"
-                        )
-                    else:
-                        logger.info(
-                            f"Column permission: user={user}, column={column_name} - SELECT granted (show normal data)"
-                        )
-
-                logger.info(
-                    f"All DIRECT column SELECT permissions granted for user={user}"
-                )
-
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Error in hierarchical permission check: {e}", exc_info=True
-            )
-            return False
 
     async def grant_permission(
         self, grant: PermissionGrant
@@ -386,17 +383,71 @@ class PermissionService:
         )
 
         resource = revoke.resource
-        object_id, resource_type, resource_id = (
-            self._build_resource_identifiers(resource, revoke.relation)
+
+        # Check if this is row filtering revoke (condition with viewer relation)
+        is_row_filtering = (
+            revoke.condition is not None
+            and revoke.relation == "viewer"
+            and revoke.condition.name == "has_attribute_access"
         )
 
-        # Build user identifier
-        user = build_user_identifier(revoke.user_id)
+        if is_row_filtering:
+            # Row filtering: build row_filter_policy object_id using the same logic as grant
+            object_id, resource_type, resource_id = (
+                self._build_row_filter_policy_identifier(
+                    resource, revoke.condition.context
+                )
+            )
 
-        # Revoke permission in OpenFGA
-        await self.openfga.revoke_permission(user, revoke.relation, object_id)
+            logger.info(
+                f"Detected row filter revoke: removing policy {object_id} and table link"
+            )
 
-        logger.info(f"Permission revoked: user={user}, object={object_id}")
+            # Build user identifier
+            user = build_user_identifier(revoke.user_id)
+
+            # 1. Revoke user's viewer permission on the row_filter_policy
+            await self.openfga.revoke_permission(
+                user, revoke.relation, object_id
+            )
+            logger.info(
+                f"Revoked viewer permission: user={user}, policy={object_id}"
+            )
+
+            # 2. Remove table-to-policy link (applies_to relation)
+            schema_name = resource.schema
+            if resource.catalog and schema_name and resource.table:
+                table_fqn = f"{resource.catalog}.{schema_name}.{resource.table}"
+                table_object_id = f"table:{table_fqn}"
+
+                try:
+                    # Remove the applies_to link: table --applies_to--> row_filter_policy
+                    await self.openfga.revoke_permission(
+                        user=table_object_id,
+                        relation="applies_to",
+                        object_id=object_id,
+                    )
+                    logger.info(
+                        f"Removed table-to-policy link: {table_object_id} --applies_to--> {object_id}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Error removing table-to-policy link (may not exist): {e}"
+                    )
+        else:
+            # Regular permission: build normal resource identifier
+            object_id, resource_type, resource_id = (
+                self._build_resource_identifiers(resource, revoke.relation)
+            )
+
+            # Build user identifier
+            user = build_user_identifier(revoke.user_id)
+
+            # Revoke permission in OpenFGA
+            await self.openfga.revoke_permission(
+                user, revoke.relation, object_id
+            )
+            logger.info(f"Permission revoked: user={user}, object={object_id}")
 
         return PermissionRevokeResponse(
             success=True,
@@ -413,6 +464,9 @@ class PermissionService:
         """
         Build resource identifiers (object_id, resource_type, resource_id)
 
+        DEPRECATED: This method is retained for backward compatibility.
+        It delegates to the unified build_resource_identifiers function.
+
         Args:
             resource: Resource specification
             relation: Relation/permission
@@ -423,79 +477,9 @@ class PermissionService:
         Raises:
             ValueError: If resource specification is invalid
         """
-        # Get schema (support both schema and namespace for backward compatibility)
-        schema_name = resource.schema or resource.namespace
-
-        # Priority: catalog (standalone) > column > table > schema
-        # Special handling for CreateCatalog: when resource is empty and relation is create,
-        # treat as CreateCatalog operation
-        if (
-            relation == "create"
-            and not resource.catalog
-            and not schema_name
-            and not resource.table
-        ):
-            # CreateCatalog with empty resource
-            object_id = "catalog:system"
-            resource_type = "catalog"
-            resource_id = "system"
-            return object_id, resource_type, resource_id
-
-        if resource.catalog and not schema_name and not resource.table:
-            # Catalog-level permission (standalone)
-            catalog_name = resource.catalog
-            object_id = f"catalog:{catalog_name}"
-            resource_type = "catalog"
-            resource_id = catalog_name
-
-        elif resource.column:
-            # Column-level permission (requires catalog, schema, and table)
-            if not (resource.catalog and schema_name and resource.table):
-                raise ValueError(
-                    "Column-level permission requires catalog, schema, table, and column. "
-                    'Example: {"catalog": "lakekeeper", "schema": "finance", "table": "user", "column": "email"}'
-                )
-            catalog_name = resource.catalog
-            table_name = resource.table
-            column_name = resource.column
-            object_id = f"column:{catalog_name}.{schema_name}.{table_name}.{column_name}"
-            resource_type = "column"
-            resource_id = (
-                f"{catalog_name}.{schema_name}.{table_name}.{column_name}"
-            )
-
-        elif resource.table and schema_name:
-            # Table-level permission (requires catalog and schema)
-            if not resource.catalog:
-                raise ValueError(
-                    "Table-level permission requires catalog, schema, and table. "
-                    'Example: {"catalog": "lakekeeper", "schema": "finance", "table": "user"}'
-                )
-            catalog_name = resource.catalog
-            table_name = resource.table
-            object_id = f"table:{catalog_name}.{schema_name}.{table_name}"
-            resource_type = "table"
-            resource_id = f"{catalog_name}.{schema_name}.{table_name}"
-
-        elif schema_name:
-            # Schema-level permission (requires catalog)
-            if not resource.catalog:
-                raise ValueError(
-                    "Schema-level permission requires catalog and schema. "
-                    'Example: {"catalog": "lakekeeper", "schema": "finance"}'
-                )
-            catalog_name = resource.catalog
-            object_id = f"namespace:{catalog_name}.{schema_name}"
-            resource_type = "schema"
-            resource_id = f"{catalog_name}.{schema_name}"
-
-        else:
-            raise ValueError(
-                "Resource must specify at least one of: catalog (standalone), "
-                "schema (with catalog), or table (with catalog and schema)."
-            )
-
-        return object_id, resource_type, resource_id
+        return build_resource_identifiers(
+            resource, relation, raise_on_error=True
+        )
 
     def _build_row_filter_policy_identifier(
         self, resource, condition_context
@@ -517,7 +501,7 @@ class PermissionService:
             ValueError: If resource or condition context is invalid
         """
         # Validate resource has table information
-        schema_name = resource.schema or resource.namespace
+        schema_name = resource.schema
         if not (resource.catalog and schema_name and resource.table):
             raise ValueError(
                 "Row filter policy requires catalog, schema, and table. "
@@ -560,7 +544,7 @@ class PermissionService:
             policy_object_id: Policy object ID (e.g., "row_filter_policy:user_region_filter")
         """
         try:
-            schema_name = resource.schema or resource.namespace
+            schema_name = resource.schema
             table_fqn = f"{resource.catalog}.{schema_name}.{resource.table}"
             table_object_id = f"table:{table_fqn}"
 

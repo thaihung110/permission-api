@@ -52,7 +52,7 @@ OPERATION_TO_RELATION_MAP = {
 
 # OpenFGA object type prefixes
 OBJECT_TYPE_CATALOG = "catalog"
-OBJECT_TYPE_NAMESPACE = "namespace"
+OBJECT_TYPE_SCHEMA = "schema"  # Changed from namespace to schema in OpenFGA v2
 OBJECT_TYPE_TABLE = "table"
 OBJECT_TYPE_COLUMN = "column"
 

@@ -36,14 +36,14 @@ fga model get --store-id <STORE_ID> --api-url http://localhost:8085 --id <MODEL_
 ## Submit Authorization Model
 
 ```bash
-# Submit model từ file auth_model.fga vào store
-fga model write --store-id <STORE_ID> --api-url http://localhost:8085 --file auth_model.fga
+# Submit model từ file openfga_v2/auth_model_v2.json vào store
+fga model write --store-id <STORE_ID> --api-url http://localhost:8085 --file openfga_v2/auth_model_v2.json
 
 # Lấy MODEL_ID từ response, sau đó set làm default (dùng --id thay vì --store-id)
 fga store update --id <STORE_ID> --api-url http://localhost:8085 --default-model-id <MODEL_ID>
 
 # Hoặc nếu đã set FGA_STORE_ID và FGA_API_URL
-fga model write --file auth_model.fga
+fga model write --file openfga_v2/auth_model_v2.json
 # Lấy MODEL_ID từ output, rồi:
 fga store update --id $FGA_STORE_ID --default-model-id <MODEL_ID>
 ```
@@ -65,15 +65,15 @@ docker compose -f docker-compose-openfga.yaml up -d
 export FGA_API_URL=http://localhost:8085
 ```
 
-## Tạo store và apply auth_model.fga
+## Tạo store và apply openfga_v2/auth_model_v2.json
 
 ```bash
 # 1) Tạo store mới
 fga store create --name lakehouse-permission --api-url $FGA_API_URL
 # Lấy STORE_ID từ output
 
-# 2) Ghi model từ file auth_model.fga
-fga model write --store-id <STORE_ID> --api-url $FGA_API_URL --file auth_model.fga
+# 2) Ghi model từ file openfga_v2/auth_model_v2.json
+fga model write --store-id <STORE_ID> --api-url $FGA_API_URL --file openfga_v2/auth_model_v2.json
 # Lấy MODEL_ID (authorization_model_id) từ output
 
 # 3) Set model đó làm default cho store

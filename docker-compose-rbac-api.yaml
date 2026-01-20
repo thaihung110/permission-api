@@ -79,7 +79,7 @@ services:
         condition: service_healthy
     networks:
       - lakehouse-network
-    restart: unless-stopped
+    restart: no
 
 volumes:
   openfga-db-data:

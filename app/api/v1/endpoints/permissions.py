@@ -72,7 +72,7 @@ async def grant_permission(
 
     OpenFGA object_id conventions:
     - catalog:<catalog_name>
-    - namespace:<catalog>.<schema_name> (catalog required)
+    - schema:<catalog>.<schema_name> (catalog required)
     - table:<catalog>.<schema_name>.<table_name> (catalog and schema required)
     """
     try:

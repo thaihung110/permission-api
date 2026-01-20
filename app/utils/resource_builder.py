@@ -2,7 +2,205 @@
 Utility functions for building OpenFGA resource identifiers
 """
 
-from typing import Optional
+from typing import Optional, Tuple, Union
+
+from app.core.constants import (
+    OBJECT_TYPE_CATALOG,
+    OBJECT_TYPE_COLUMN,
+    OBJECT_TYPE_SCHEMA,
+    OBJECT_TYPE_TABLE,
+    SYSTEM_CATALOG,
+)
+
+
+def _extract_resource_fields(
+    resource: Union[dict, object],
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """
+    Extract resource fields handling both dict and object types.
+
+    Args:
+        resource: Resource as dict or Pydantic model
+
+    Returns:
+        Tuple of (catalog_name, schema_name, table_name, column_name)
+    """
+    # Handle dict type
+    if isinstance(resource, dict):
+        catalog_name = resource.get("catalog_name") or resource.get("catalog")
+        schema_name = resource.get("schema_name") or resource.get("schema")
+        table_name = resource.get("table_name") or resource.get("table")
+        column_name = resource.get("column_name") or resource.get("column")
+    else:
+        # Handle object type (Pydantic model)
+        catalog_name = getattr(resource, "catalog", None)
+        schema_name = getattr(resource, "schema", None)
+        table_name = getattr(resource, "table", None)
+        column_name = getattr(resource, "column", None)
+
+    return catalog_name, schema_name, table_name, column_name
+
+
+def build_resource_identifiers(
+    resource: Union[dict, object],
+    operation_or_relation: str,
+    raise_on_error: bool = False,
+) -> Optional[Tuple[str, str, str]]:
+    """
+    Build OpenFGA resource identifiers (object_id, resource_type, resource_id).
+
+    Unified function that handles both dict and Pydantic model inputs,
+    and can be used for both permission checking and granting.
+
+    This function intentionally does NOT resolve resources via Lakekeeper DB.
+    It only uses the textual identifiers coming from the caller.
+
+    Request body fields: catalog, schema, table, column
+    OpenFGA object_id format:
+    - Catalog:  catalog:<catalog_name>
+    - Schema: schema:<catalog>.<schema_name> (requires catalog)
+    - Table: table:<catalog>.<schema_name>.<table_name> (requires catalog and schema)
+    - Column: column:<catalog>.<schema>.<table>.<column> (requires all)
+
+    Special operations/relations:
+    - CreateCatalog / create (no resource): Grants on catalog:system
+    - CreateSchema / create (catalog only): Authorizes on catalog:<catalog>
+    - CreateTable / create (catalog+schema): Authorizes on schema:<catalog>.<schema>
+
+    Args:
+        resource: Resource specification (dict or Pydantic model)
+        operation_or_relation: Operation name (e.g., "CreateCatalog") or relation (e.g., "create")
+        raise_on_error: If True, raise ValueError on invalid resource; if False, return None
+
+    Returns:
+        Tuple of (object_id, resource_type, resource_id) or None if cannot build
+
+    Raises:
+        ValueError: If raise_on_error=True and resource specification is invalid
+    """
+    catalog_name, schema_name, table_name, column_name = (
+        _extract_resource_fields(resource)
+    )
+
+    # Normalize operation/relation to relation for consistency
+    # Both "create" and "CreateCatalog", "CreateSchema", "CreateTable" are handled
+    is_create_operation = operation_or_relation in (
+        "create",
+        "CreateCatalog",
+        "CreateSchema",
+        "CreateTable",
+    )
+
+    # Special case: CreateCatalog or create relation with no resource
+    # For grant: resource can be empty, grant on catalog:system
+    # For check: always check on catalog:system (where permission was granted for CreateCatalog)
+    if operation_or_relation == "CreateCatalog" or (
+        operation_or_relation == "create"
+        and not catalog_name
+        and not schema_name
+        and not table_name
+    ):
+        # Always use catalog:system for CreateCatalog permission
+        object_id = f"{OBJECT_TYPE_CATALOG}:{SYSTEM_CATALOG}"
+        resource_type = OBJECT_TYPE_CATALOG
+        resource_id = SYSTEM_CATALOG
+        return object_id, resource_type, resource_id
+
+    # Special case: CreateSchema (Trino schema == Lakekeeper schema parented by catalog)
+    # Requires catalog in resource. Schema does not exist yet, so we authorize on the catalog object.
+    if operation_or_relation == "CreateSchema":
+        if not catalog_name:
+            if raise_on_error:
+                raise ValueError(
+                    "CreateSchema requires catalog in resource. "
+                    'Example: {"catalog": "lakekeeper"}'
+                )
+            return None
+        object_id = f"{OBJECT_TYPE_CATALOG}:{catalog_name}"
+        resource_type = OBJECT_TYPE_CATALOG
+        resource_id = catalog_name
+        return object_id, resource_type, resource_id
+
+    # Special case: CreateTable is controlled at the schema level
+    # Requires catalog and schema in resource. The table does not exist yet,
+    # so we check the `create` relation on schema.
+    if operation_or_relation == "CreateTable":
+        if not catalog_name or not schema_name:
+            if raise_on_error:
+                raise ValueError(
+                    "CreateTable requires catalog and schema in resource. "
+                    'Example: {"catalog": "lakekeeper", "schema": "finance"}'
+                )
+            return None
+        object_id = f"{OBJECT_TYPE_SCHEMA}:{catalog_name}.{schema_name}"
+        resource_type = OBJECT_TYPE_SCHEMA
+        resource_id = f"{catalog_name}.{schema_name}"
+        return object_id, resource_type, resource_id
+
+    # Column-level permissions: requires catalog, schema, table, and column
+    # NOTE: Column identifiers are built here, but in check_permission:
+    # - 'mask' relation is checked at column level (column-specific)
+    # - All other relations (select, describe, modify) are redirected to table level
+    #   because columns inherit these permissions from their parent table in FGA model
+    if column_name:
+        if not (catalog_name and schema_name and table_name):
+            if raise_on_error:
+                raise ValueError(
+                    "Column-level permission requires catalog, schema, table, and column. "
+                    'Example: {"catalog": "lakekeeper", "schema": "finance", "table": "user", "column": "email"}'
+                )
+            return None
+        object_id = f"{OBJECT_TYPE_COLUMN}:{catalog_name}.{schema_name}.{table_name}.{column_name}"
+        resource_type = OBJECT_TYPE_COLUMN
+        resource_id = f"{catalog_name}.{schema_name}.{table_name}.{column_name}"
+        return object_id, resource_type, resource_id
+
+    # Generic mapping by priority: catalog (standalone) > table > schema
+
+    # Catalog-level access (standalone - no schema or table)
+    if catalog_name and not schema_name and not table_name:
+        object_id = f"{OBJECT_TYPE_CATALOG}:{catalog_name}"
+        resource_type = OBJECT_TYPE_CATALOG
+        resource_id = catalog_name
+        return object_id, resource_type, resource_id
+
+    # Table-level permission (requires catalog and schema)
+    if table_name and schema_name:
+        if not catalog_name:
+            if raise_on_error:
+                raise ValueError(
+                    "Table-level permission requires catalog, schema, and table. "
+                    'Example: {"catalog": "lakekeeper", "schema": "finance", "table": "user"}'
+                )
+            return None
+        object_id = (
+            f"{OBJECT_TYPE_TABLE}:{catalog_name}.{schema_name}.{table_name}"
+        )
+        resource_type = OBJECT_TYPE_TABLE
+        resource_id = f"{catalog_name}.{schema_name}.{table_name}"
+        return object_id, resource_type, resource_id
+
+    # Schema-level permission (requires catalog)
+    if schema_name:
+        if not catalog_name:
+            if raise_on_error:
+                raise ValueError(
+                    "Schema-level permission requires catalog and schema. "
+                    'Example: {"catalog": "lakekeeper", "schema": "finance"}'
+                )
+            return None
+        object_id = f"{OBJECT_TYPE_SCHEMA}:{catalog_name}.{schema_name}"
+        resource_type = OBJECT_TYPE_SCHEMA
+        resource_id = f"{catalog_name}.{schema_name}"
+        return object_id, resource_type, resource_id
+
+    # If we reach here, we don't have enough information to build identifiers
+    if raise_on_error:
+        raise ValueError(
+            "Resource must specify at least one of: catalog (standalone), "
+            "schema (with catalog), table (with catalog and schema), or column (with all)."
+        )
+    return None
 
 
 def build_object_id_from_resource(
@@ -11,19 +209,8 @@ def build_object_id_from_resource(
     """
     Build OpenFGA object_id directly from the request resource payload.
 
-    This function intentionally does NOT resolve resources via Lakekeeper DB.
-    It only uses the textual identifiers coming from the caller.
-
-    Request body fields: catalog, schema, table
-    OpenFGA object_id format:
-    - Catalog:  catalog:<catalog_name>
-    - Namespace: namespace:<catalog>.<schema_name> (requires catalog)
-    - Table: table:<catalog>.<schema_name>.<table_name> (requires catalog and schema)
-
-    Special operations:
-    - CreateCatalog: Requires catalog name in resource (or can be empty for grant)
-    - CreateSchema: Requires catalog in resource
-    - CreateTable: Requires catalog and schema in resource
+    DEPRECATED: Use build_resource_identifiers() instead for consistency.
+    This function is kept for backward compatibility.
 
     Args:
         resource: Resource dictionary with keys: catalog, schema, table
@@ -32,56 +219,9 @@ def build_object_id_from_resource(
     Returns:
         OpenFGA object_id string or None if cannot build
     """
-    # Support both catalog_name/catalog and schema_name/schema for backward compatibility
-    catalog_name = resource.get("catalog_name") or resource.get("catalog")
-    schema_name = resource.get("schema_name") or resource.get("schema")
-    table_name = resource.get("table_name") or resource.get("table")
-    column_name = resource.get("column_name") or resource.get("column")
-
-    # Special case: CreateCatalog
-    # For grant: resource can be empty, grant on catalog:system
-    # For check: always check on catalog:system (where permission was granted for CreateCatalog)
-    # Note: When granting CreateCatalog permission with empty resource, we grant on catalog:system
-    #       So when checking CreateCatalog, we should always check on catalog:system regardless of catalog name
-    if operation == "CreateCatalog":
-        # Always check on catalog:system where CreateCatalog permission was granted
-        return "catalog:system"
-
-    # Special case: CreateSchema (Trino schema == Lakekeeper namespace parented by catalog).
-    # Requires catalog in resource. Namespace does not exist yet, so we authorize on the catalog object.
-    if operation == "CreateSchema":
-        if not catalog_name:
-            return None  # Catalog is required
-        return f"catalog:{catalog_name}"
-
-    # Special case: CreateTable is controlled at the namespace level.
-    # Requires catalog and schema in resource. The table does not exist yet,
-    # so we check the `create` relation on namespace.
-    if operation == "CreateTable":
-        if not catalog_name or not schema_name:
-            return None  # Both catalog and schema are required
-        return f"namespace:{catalog_name}.{schema_name}"
-
-    # Column-level masking: requires catalog, schema, table, and column
-    if column_name:
-        if not (catalog_name and schema_name and table_name):
-            return None  # Column requires catalog, schema, and table
-        return f"column:{catalog_name}.{schema_name}.{table_name}.{column_name}"
-
-    # Generic mapping by priority: catalog (standalone) > table > namespace
-    if catalog_name and not schema_name and not table_name:
-        # Catalog-level access
-        return f"catalog:{catalog_name}"
-
-    if table_name and schema_name:
-        if not catalog_name:
-            return None  # Catalog is required for table
-        return f"table:{catalog_name}.{schema_name}.{table_name}"
-
-    if schema_name:
-        if not catalog_name:
-            return None  # Catalog is required for namespace
-        return f"namespace:{catalog_name}.{schema_name}"
-
-    # If we reach here, we don't have enough information to build an object_id.
+    result = build_resource_identifiers(
+        resource, operation, raise_on_error=False
+    )
+    if result:
+        return result[0]  # Return only object_id
     return None

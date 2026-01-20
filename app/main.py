@@ -38,11 +38,9 @@ async def lifespan(app: FastAPI):
         logger.info("Setting up OpenFGA store and authorization model...")
         setup = OpenFGASetup(api_url=settings.openfga_api_url)
 
-        # Path to authorization model file
+        # Path to authorization model file (OpenFGA v2)
         auth_model_path = (
-            Path(__file__).parent.parent
-            / "openfga"
-            / "auth_model_row_filter.fga"
+            Path(__file__).parent.parent / "openfga_v2" / "auth_model_v2.json"
         )
 
         # Ensure store and model exist

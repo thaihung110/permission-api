@@ -20,17 +20,6 @@ class ResourceSpec(BaseModel):
     column: Optional[str] = Field(
         None, description="Column name (e.g., 'email')"
     )
-    # Backward compatibility: support namespace as alias for schema
-    namespace: Optional[str] = Field(
-        None, description="Namespace name (deprecated, use 'schema' instead)"
-    )
-
-    @model_validator(mode="after")
-    def normalize_schema_namespace(self):
-        """Normalize: if namespace is provided but schema is not, copy to schema"""
-        if self.namespace and not self.schema:
-            self.schema = self.namespace
-        return self
 
 
 class PermissionCheckRequest(BaseModel):
@@ -175,7 +164,12 @@ class PermissionRevoke(BaseModel):
         description="Resource specification with catalog, schema, table",
     )
     relation: str = Field(
-        ..., description="Relation/permission (e.g., select, ownership, create)"
+        ...,
+        description="Relation/permission (e.g., select, ownership, create, viewer)",
+    )
+    condition: Optional[ConditionSpec] = Field(
+        None,
+        description="Optional condition context for row filter revocation (provide attribute_name to identify policy)",
     )
 
     class Config:
@@ -201,6 +195,25 @@ class PermissionRevoke(BaseModel):
                             "table": "user",
                         },
                         "relation": "select",
+                    },
+                },
+                {
+                    "description": "Row filter policy revocation",
+                    "value": {
+                        "user_id": "hung",
+                        "resource": {
+                            "catalog": "lakekeeper_bronze",
+                            "schema": "finance",
+                            "table": "user",
+                        },
+                        "relation": "viewer",
+                        "condition": {
+                            "name": "has_attribute_access",
+                            "context": {
+                                "attribute_name": "region",
+                                "allowed_values": [],
+                            },
+                        },
                     },
                 },
             ]

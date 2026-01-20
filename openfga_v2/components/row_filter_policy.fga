@@ -1,0 +1,17 @@
+
+module row_filter_policy
+type row_filter_policy
+  relations
+    # Policy applies to which table
+    define applies_to: [table]
+
+    # Users allowed under this policy (with attribute filter in condition)
+    define viewer: [user with has_attribute_access]
+
+    # Admin can manage policy
+    define admin: [user]
+
+condition has_attribute_access(attribute_name: string, allowed_values: list<string>) {
+  attribute_name != "" && allowed_values.size() > 0
+}
+

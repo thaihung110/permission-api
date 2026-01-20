@@ -15,7 +15,7 @@ OPERATION_TO_RELATION_MAP = {
     "CreateCatalog": "create",
     "DropCatalog": "modify",
     "FilterCatalogs": "describe",
-    # Namespace operations
+    # Schema operations
     "ShowSchemas": "describe",
     "CreateSchema": "create",
     "DropSchema": "modify",
