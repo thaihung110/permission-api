@@ -14,9 +14,11 @@
 2. [Permission Grant Operations](#2-permission-grant-operations)
 3. [Permission Check Operations](#3-permission-check-operations)
 4. [Row Filter Operations](#4-row-filter-operations)
-5. [Permission Revoke Operations](#5-permission-revoke-operations)
-6. [Advanced Test Scenarios](#6-advanced-test-scenarios)
-7. [Database Verification](#7-database-verification)
+5. [Row Filter Policy Operations](#5-row-filter-policy-operations)
+6. [Column Mask Operations](#6-column-mask-operations)
+7. [Permission Revoke Operations](#7-permission-revoke-operations)
+8. [Advanced Test Scenarios](#8-advanced-test-scenarios)
+9. [Database Verification](#9-database-verification)
 
 ---
 
@@ -417,162 +419,15 @@ curl -X POST {{baseUrl}}/permissions/grant \
 
 ---
 
-### 2.12. Grant Row Filter Permission (Single Region)
+### 2.12. Grant Row Filter Permission (DEPRECATED - Use Section 5.1)
 
-```bash
-curl -X POST {{baseUrl}}/permissions/grant \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "hung",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "finance",
-      "table": "user"
-    },
-    "relation": "viewer",
-    "condition": {
-      "name": "has_attribute_access",
-      "context": {
-        "attribute_name": "region",
-        "allowed_values": ["north"]
-      }
-    }
-  }'
-```
-
-**Expected Response:**
-
-```json
-{
-  "success": true,
-  "user_id": "hung",
-  "resource_type": "row_filter_policy",
-  "resource_id": "lakekeeper_bronze.finance.user_region_filter",
-  "object_id": "row_filter_policy:lakekeeper_bronze.finance.user_region_filter",
-  "relation": "viewer"
-}
-```
-
-**OpenFGA Tuples Created:**
-
-1. `user:hung --viewer--> row_filter_policy:lakekeeper_bronze.finance.user_region_filter` (with condition: `has_attribute_access`)
-2. `table:lakekeeper_bronze.finance.user --applies_to--> row_filter_policy:lakekeeper_bronze.finance.user_region_filter`
+**Note:** Row filter permissions should now be granted using the dedicated `/row-filter/grant` endpoint (see Section 5.1). The old `/permissions/grant` endpoint with `relation="viewer"` and condition is deprecated but still supported for backward compatibility.
 
 ---
 
-### 2.13. Grant Row Filter Permission (Multiple Regions)
+### 2.15. Grant Column Mask Permission (DEPRECATED - Use Section 6.1)
 
-```bash
-curl -X POST {{baseUrl}}/permissions/grant \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "sale_nam",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "finance",
-      "table": "customer"
-    },
-    "relation": "viewer",
-    "condition": {
-      "name": "has_attribute_access",
-      "context": {
-        "attribute_name": "region",
-        "allowed_values": ["north", "central"]
-      }
-    }
-  }'
-```
-
-**Expected Response:**
-
-```json
-{
-  "success": true,
-  "user_id": "sale_nam",
-  "resource_type": "row_filter_policy",
-  "resource_id": "lakekeeper_bronze.finance.customer_region_filter",
-  "object_id": "row_filter_policy:lakekeeper_bronze.finance.customer_region_filter",
-  "relation": "viewer"
-}
-```
-
----
-
-### 2.14. Grant Row Filter Permission (Department-Based)
-
-```bash
-curl -X POST {{baseUrl}}/permissions/grant \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "manager_finance",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "hr",
-      "table": "employee"
-    },
-    "relation": "viewer",
-    "condition": {
-      "name": "has_attribute_access",
-      "context": {
-        "attribute_name": "department",
-        "allowed_values": ["finance", "accounting"]
-      }
-    }
-  }'
-```
-
-**Expected Response:**
-
-```json
-{
-  "success": true,
-  "user_id": "manager_finance",
-  "resource_type": "row_filter_policy",
-  "resource_id": "lakekeeper_bronze.hr.employee_department_filter",
-  "object_id": "row_filter_policy:lakekeeper_bronze.hr.employee_department_filter",
-  "relation": "viewer"
-}
-```
-
----
-
-### 2.15. Grant Column Mask Permission
-
-**Note:** To mask a specific column, grant `mask` permission on the **column** resource. This is used for column-level data masking.
-
-```bash
-curl -X POST {{baseUrl}}/permissions/grant \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "analyst",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "finance",
-      "table": "user",
-      "column": "email"
-    },
-    "relation": "mask"
-  }'
-```
-
-**Expected Response:**
-
-```json
-{
-  "success": true,
-  "user_id": "analyst",
-  "resource_type": "column",
-  "resource_id": "lakekeeper_bronze.finance.user.email",
-  "object_id": "column:lakekeeper_bronze.finance.user.email",
-  "relation": "mask"
-}
-```
-
-**OpenFGA Tuple Created:**
-
-- `user:analyst --mask--> column:lakekeeper_bronze.finance.user.email`
-
-**Usage:** This marks the `email` column for masking when user `analyst` queries the table. The actual masking logic is handled by the policy engine.
+**Note:** Column mask permissions should now be granted using the dedicated `/column-mask/grant` endpoint (see Section 6.1). The old `/permissions/grant` endpoint with `relation="mask"` is deprecated but still supported for backward compatibility.
 
 ---
 
@@ -1121,10 +976,12 @@ curl -X POST {{baseUrl}}/permissions/check \
 
 ## 4. Row Filter Operations
 
-### 4.1. Get Row Filter (Single Region)
+### 4.1. Get Row Filter SQL (Single Region)
+
+**Note:** This endpoint has been moved from `/permissions/row-filter` to `/row-filter/query`. The old endpoint is deprecated but still supported for backward compatibility.
 
 ```bash
-curl -X POST {{baseUrl}}/permissions/row-filter \
+curl -X POST {{baseUrl}}/row-filter/query \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "hung",
@@ -1147,10 +1004,10 @@ curl -X POST {{baseUrl}}/permissions/row-filter \
 
 ---
 
-### 4.2. Get Row Filter (Multiple Regions)
+### 4.2. Get Row Filter SQL (Multiple Regions)
 
 ```bash
-curl -X POST {{baseUrl}}/permissions/row-filter \
+curl -X POST {{baseUrl}}/row-filter/query \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "sale_nam",
@@ -1173,10 +1030,10 @@ curl -X POST {{baseUrl}}/permissions/row-filter \
 
 ---
 
-### 4.3. Get Row Filter (Multiple Attributes)
+### 4.3. Get Row Filter SQL (Multiple Attributes)
 
 ```bash
-curl -X POST {{baseUrl}}/permissions/row-filter \
+curl -X POST {{baseUrl}}/row-filter/query \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "manager_finance",
@@ -1199,10 +1056,10 @@ curl -X POST {{baseUrl}}/permissions/row-filter \
 
 ---
 
-### 4.4. Get Row Filter (No Filter Applied)
+### 4.4. Get Row Filter SQL (No Filter Applied)
 
 ```bash
-curl -X POST {{baseUrl}}/permissions/row-filter \
+curl -X POST {{baseUrl}}/row-filter/query \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "alice",
@@ -1225,10 +1082,10 @@ curl -X POST {{baseUrl}}/permissions/row-filter \
 
 ---
 
-### 4.5. Get Row Filter (Invalid Resource)
+### 4.5. Get Row Filter SQL (Invalid Resource)
 
 ```bash
-curl -X POST {{baseUrl}}/permissions/row-filter \
+curl -X POST {{baseUrl}}/row-filter/query \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "hung",
@@ -1251,10 +1108,10 @@ curl -X POST {{baseUrl}}/permissions/row-filter \
 
 ---
 
-### 4.6. Get Row Filter (Error Handling)
+### 4.6. Get Row Filter SQL (Error Handling)
 
 ```bash
-curl -X POST {{baseUrl}}/permissions/row-filter \
+curl -X POST {{baseUrl}}/row-filter/query \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "hung",
@@ -1279,9 +1136,329 @@ curl -X POST {{baseUrl}}/permissions/row-filter \
 
 ---
 
-## 5. Permission Revoke Operations
+## 5. Row Filter Policy Operations
 
-### 5.1. Revoke Catalog-Level Select Permission
+This section covers dedicated endpoints for managing row filter policies. These endpoints provide a cleaner API specifically designed for row filtering operations.
+
+### 5.1. Grant Row Filter Policy (Single Region)
+
+**Prerequisites:** None
+
+**Note:** This is the recommended way to grant row filter policies. The old `/permissions/grant` endpoint with `relation="viewer"` is deprecated.
+
+```bash
+curl -X POST {{baseUrl}}/row-filter/grant \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "hung",
+    "resource": {
+      "catalog": "lakekeeper_bronze",
+      "schema": "finance",
+      "table": "user"
+    },
+    "attribute_name": "region",
+    "allowed_values": ["north"]
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "success": true,
+  "user_id": "hung",
+  "policy_id": "user_region_filter",
+  "object_id": "row_filter_policy:user_region_filter",
+  "table_fqn": "lakekeeper_bronze.finance.user",
+  "attribute_name": "region",
+  "relation": "viewer"
+}
+```
+
+**OpenFGA Tuples Created:**
+
+1. `user:hung --viewer--> row_filter_policy:user_region_filter` (with condition: `has_attribute_access`, context: `{"attribute_name": "region", "allowed_values": ["north"]}`)
+2. `table:lakekeeper_bronze.finance.user --applies_to--> row_filter_policy:user_region_filter`
+
+---
+
+### 5.2. Grant Row Filter Policy (Multiple Regions)
+
+```bash
+curl -X POST {{baseUrl}}/row-filter/grant \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "sale_nam",
+    "resource": {
+      "catalog": "lakekeeper_bronze",
+      "schema": "finance",
+      "table": "customer"
+    },
+    "attribute_name": "region",
+    "allowed_values": ["north", "central"]
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "success": true,
+  "user_id": "sale_nam",
+  "policy_id": "customer_region_filter",
+  "object_id": "row_filter_policy:customer_region_filter",
+  "table_fqn": "lakekeeper_bronze.finance.customer",
+  "attribute_name": "region",
+  "relation": "viewer"
+}
+```
+
+---
+
+### 5.3. Grant Row Filter Policy (Department-Based)
+
+```bash
+curl -X POST {{baseUrl}}/row-filter/grant \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "manager_finance",
+    "resource": {
+      "catalog": "lakekeeper_bronze",
+      "schema": "hr",
+      "table": "employee"
+    },
+    "attribute_name": "department",
+    "allowed_values": ["finance", "accounting"]
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "success": true,
+  "user_id": "manager_finance",
+  "policy_id": "employee_department_filter",
+  "object_id": "row_filter_policy:employee_department_filter",
+  "table_fqn": "lakekeeper_bronze.hr.employee",
+  "attribute_name": "department",
+  "relation": "viewer"
+}
+```
+
+---
+
+### 5.4. Revoke Row Filter Policy
+
+**Prerequisites:** User must have been granted a row filter policy in section 5.1, 5.2, or 5.3.
+
+**Note:** This is the recommended way to revoke row filter policies. The old `/permissions/revoke` endpoint with `relation="viewer"` is deprecated.
+
+```bash
+curl -X POST {{baseUrl}}/row-filter/revoke \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "hung",
+    "resource": {
+      "catalog": "lakekeeper_bronze",
+      "schema": "finance",
+      "table": "user"
+    },
+    "attribute_name": "region",
+    "allowed_values": []
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "success": true,
+  "user_id": "hung",
+  "policy_id": "user_region_filter",
+  "object_id": "row_filter_policy:user_region_filter",
+  "table_fqn": "lakekeeper_bronze.finance.user",
+  "attribute_name": "region",
+  "relation": "viewer"
+}
+```
+
+**OpenFGA Tuples Deleted:**
+
+1. `user:hung --viewer--> row_filter_policy:user_region_filter`
+2. `table:lakekeeper_bronze.finance.user --applies_to--> row_filter_policy:user_region_filter`
+
+**Note:** `allowed_values` can be empty for revoke (not used in deletion). The system uses `attribute_name` to build policy_id: `{table}_{attribute}_filter`.
+
+---
+
+### 5.5. List Row Filter Policies for User on Table
+
+**Prerequisites:** User must have been granted row filter policies on the table.
+
+**Note:** This endpoint returns all row filter policies that the user has access to on a specific table.
+
+```bash
+curl -X POST {{baseUrl}}/row-filter/list \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "hung",
+    "resource": {
+      "catalog_name": "lakekeeper_bronze",
+      "schema_name": "finance",
+      "table_name": "user"
+    }
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "user_id": "hung",
+  "table_fqn": "lakekeeper_bronze.finance.user",
+  "policies": [
+    {
+      "policy_id": "user_region_filter",
+      "attribute_name": "region",
+      "allowed_values": ["north"]
+    }
+  ],
+  "count": 1
+}
+```
+
+**Explanation:**
+
+- Queries OpenFGA for all row filter policies linked to the table
+- Checks which policies the user has `viewer` access to
+- Returns policy details including `attribute_name` and `allowed_values`
+
+---
+
+## 6. Column Mask Operations
+
+This section covers dedicated endpoints for managing column mask permissions. These endpoints provide a cleaner API specifically designed for column masking operations.
+
+### 6.1. Grant Column Mask Permission
+
+**Prerequisites:** None
+
+**Note:** This is the recommended way to grant column mask permissions. The old `/permissions/grant` endpoint with `relation="mask"` is deprecated.
+
+```bash
+curl -X POST {{baseUrl}}/column-mask/grant \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "analyst",
+    "resource": {
+      "catalog": "lakekeeper_bronze",
+      "schema": "finance",
+      "table": "user",
+      "column": "email"
+    }
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "success": true,
+  "user_id": "analyst",
+  "column_id": "lakekeeper_bronze.finance.user.email",
+  "object_id": "column:lakekeeper_bronze.finance.user.email",
+  "relation": "mask"
+}
+```
+
+**OpenFGA Tuple Created:**
+
+- `user:analyst --mask--> column:lakekeeper_bronze.finance.user.email`
+
+**Usage:** This marks the `email` column for masking when user `analyst` queries the table. The actual masking logic is handled by the policy engine.
+
+---
+
+### 6.2. Revoke Column Mask Permission
+
+**Prerequisites:** User must have been granted column mask permission in section 6.1.
+
+**Note:** This is the recommended way to revoke column mask permissions. The old `/permissions/revoke` endpoint with `relation="mask"` is deprecated.
+
+```bash
+curl -X POST {{baseUrl}}/column-mask/revoke \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "analyst",
+    "resource": {
+      "catalog": "lakekeeper_bronze",
+      "schema": "finance",
+      "table": "user",
+      "column": "email"
+    }
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "success": true,
+  "user_id": "analyst",
+  "column_id": "lakekeeper_bronze.finance.user.email",
+  "object_id": "column:lakekeeper_bronze.finance.user.email",
+  "relation": "mask"
+}
+```
+
+**OpenFGA Tuple Deleted:**
+
+- `user:analyst --mask--> column:lakekeeper_bronze.finance.user.email`
+
+---
+
+### 6.3. List Masked Columns for User on Table
+
+**Prerequisites:** User must have been granted column mask permissions on columns in the table.
+
+**Note:** This endpoint returns all columns that are masked for the user on a specific table.
+
+```bash
+curl -X POST {{baseUrl}}/column-mask/list \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "analyst",
+    "resource": {
+      "catalog_name": "lakekeeper_bronze",
+      "schema_name": "finance",
+      "table_name": "user"
+    }
+  }'
+```
+
+**Expected Response:**
+
+```json
+{
+  "user_id": "analyst",
+  "table_fqn": "lakekeeper_bronze.finance.user",
+  "masked_columns": ["email", "phone_number"],
+  "count": 2
+}
+```
+
+**Explanation:**
+
+- Queries OpenFGA for all `mask` relation tuples for the user
+- Filters columns that belong to the specified table
+- Returns list of column names that are masked
+
+---
+
+## 7. Permission Revoke Operations
+
+### 7.1. Revoke Catalog-Level Select Permission
 
 ```bash
 curl -X POST {{baseUrl}}/permissions/revoke \
@@ -1314,7 +1491,7 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 
 ---
 
-### 5.2. Revoke CreateCatalog Permission (System-Level)
+### 7.2. Revoke CreateCatalog Permission (System-Level)
 
 **Note:** To revoke the CreateCatalog permission, you must revoke `create` permission from `catalog:system` using an **empty resource** `{}`.
 
@@ -1347,7 +1524,7 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 
 ---
 
-### 5.3. Revoke Schema-Level Select Permission
+### 7.3. Revoke Schema-Level Select Permission
 
 ```bash
 curl -X POST {{baseUrl}}/permissions/revoke \
@@ -1381,7 +1558,7 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 
 ---
 
-### 5.4. Revoke CreateSchema Permission (Catalog-Level)
+### 7.4. Revoke CreateSchema Permission (Catalog-Level)
 
 **Note:** To revoke the permission to create new schemas in a catalog, revoke `create` permission from the **catalog** (not schema). This corresponds to the grant in section 2.4.
 
@@ -1416,7 +1593,7 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 
 ---
 
-### 5.5. Revoke CreateTable Permission (Schema-Level)
+### 7.5. Revoke CreateTable Permission (Schema-Level)
 
 **Note:** This revokes the permission to create tables in a schema. The resource contains both catalog and schema, and revokes `create` permission from the **schema** object. This corresponds to the grant in section 2.6.
 
@@ -1452,7 +1629,7 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 
 ---
 
-### 5.6. Revoke Table-Level Select Permission
+### 7.6. Revoke Table-Level Select Permission
 
 ```bash
 curl -X POST {{baseUrl}}/permissions/revoke \
@@ -1487,7 +1664,7 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 
 ---
 
-### 5.7. Revoke Table-Level Modify Permission
+### 7.7. Revoke Table-Level Modify Permission
 
 ```bash
 curl -X POST {{baseUrl}}/permissions/revoke \
@@ -1518,7 +1695,7 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 
 ---
 
-### 5.8. Revoke Table-Level Describe Permission
+### 7.8. Revoke Table-Level Describe Permission
 
 ```bash
 curl -X POST {{baseUrl}}/permissions/revoke \
@@ -1549,93 +1726,13 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 
 ---
 
-### 5.9. Revoke Row Filter Permission (Region-Based)
+### 7.9. Revoke Row Filter Permission (DEPRECATED - Use Section 5.4)
 
-```bash
-curl -X POST {{baseUrl}}/permissions/revoke \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "hung",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "finance",
-      "table": "user"
-    },
-    "relation": "viewer",
-    "condition": {
-      "name": "has_attribute_access",
-      "context": {
-        "attribute_name": "region",
-        "allowed_values": []
-      }
-    }
-  }'
-```
-
-**Expected Response:**
-
-```json
-{
-  "success": true,
-  "user_id": "hung",
-  "resource_type": "row_filter_policy",
-  "resource_id": "lakekeeper_bronze.finance.user_region_filter",
-  "object_id": "row_filter_policy:lakekeeper_bronze.finance.user_region_filter",
-  "relation": "viewer"
-}
-```
-
-**OpenFGA Tuples Deleted:**
-
-1. `user:hung --viewer--> row_filter_policy:lakekeeper_bronze.finance.user_region_filter`
-2. `table:lakekeeper_bronze.finance.user --applies_to--> row_filter_policy:lakekeeper_bronze.finance.user_region_filter`
-
-**Note:**
-
-- `allowed_values` can be empty for revoke (not used in deletion)
-- The system uses `attribute_name` to build policy*id: `{table}*{attribute}\_filter`
+**Note:** Row filter permissions should now be revoked using the dedicated `/row-filter/revoke` endpoint (see Section 5.4). The old `/permissions/revoke` endpoint with `relation="viewer"` is deprecated but still supported for backward compatibility.
 
 ---
 
-### 5.10. Revoke Row Filter Permission (Department-Based)
-
-```bash
-curl -X POST {{baseUrl}}/permissions/revoke \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "manager_finance",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "hr",
-      "table": "employee"
-    },
-    "relation": "viewer",
-    "condition": {
-      "name": "has_attribute_access",
-      "context": {
-        "attribute_name": "department",
-        "allowed_values": []
-      }
-    }
-  }'
-```
-
-**Expected Response:**
-
-```json
-{
-  "success": true,
-  "user_id": "manager_finance",
-  "resource_type": "row_filter_policy",
-  "resource_id": "lakekeeper_bronze.hr.employee_department_filter",
-  "object_id": "row_filter_policy:lakekeeper_bronze.hr.employee_department_filter",
-  "relation": "viewer"
-}
-```
-
----
-
-### 5.11. Revoke Manage Grants Permission
+### 7.10. Revoke Manage Grants Permission
 
 ```bash
 curl -X POST {{baseUrl}}/permissions/revoke \
@@ -1666,225 +1763,11 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 
 ---
 
-### 5.12. Revoke Column Mask Permission
+### 7.11. Revoke Column Mask Permission (DEPRECATED - Use Section 6.2)
 
-```bash
-curl -X POST {{baseUrl}}/permissions/revoke \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "analyst",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "finance",
-      "table": "user",
-      "column": "email"
-    },
-    "relation": "mask"
-  }'
-```
-
-**Expected Response:**
-
-```json
-{
-  "success": true,
-  "user_id": "analyst",
-  "resource_type": "column",
-  "resource_id": "lakekeeper_bronze.finance.user.email",
-  "object_id": "column:lakekeeper_bronze.finance.user.email",
-  "relation": "mask"
-}
-```
-
-**OpenFGA Tuple Deleted:**
-
-- `user:analyst --mask--> column:lakekeeper_bronze.finance.user.email`
+**Note:** Column mask permissions should now be revoked using the dedicated `/column-mask/revoke` endpoint (see Section 6.2). The old `/permissions/revoke` endpoint with `relation="mask"` is deprecated but still supported for backward compatibility.
 
 ---
-
-## 6. Advanced Test Scenarios
-
-### 6.1. Test Hierarchical Permission Check
-
-**Setup:** Grant schema-level select permission
-
-```bash
-curl -X POST {{baseUrl}}/permissions/grant \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "charlie",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "finance"
-    },
-    "relation": "select"
-  }'
-```
-
-**Test 1:** Check catalog access (should inherit from schema permission)
-
-```bash
-curl -X POST {{baseUrl}}/permissions/check \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "charlie",
-    "operation": "AccessCatalog",
-    "resource": {
-      "catalog_name": "lakekeeper_bronze"
-    }
-  }'
-```
-
-**Expected:** `{"allowed": true}` (hierarchical inheritance)
-
-**Test 2:** Check table select in same schema
-
-```bash
-curl -X POST {{baseUrl}}/permissions/check \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "charlie",
-    "operation": "SelectFromColumns",
-    "resource": {
-      "catalog_name": "lakekeeper_bronze",
-      "schema_name": "finance",
-      "table_name": "user"
-    }
-  }'
-```
-
-**Expected:** `{"allowed": true}` (inherits from schema permission)
-
----
-
-### 6.2. Test Multiple Row Filters
-
-**Setup:** Grant multiple row filter policies for same user/table
-
-```bash
-# Filter 1: Region-based
-curl -X POST {{baseUrl}}/permissions/grant \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "data_analyst",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "sales",
-      "table": "orders"
-    },
-    "relation": "viewer",
-    "condition": {
-      "name": "has_attribute_access",
-      "context": {
-        "attribute_name": "region",
-        "allowed_values": ["north", "south"]
-      }
-    }
-  }'
-
-# Filter 2: Status-based
-curl -X POST {{baseUrl}}/permissions/grant \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "data_analyst",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "sales",
-      "table": "orders"
-    },
-    "relation": "viewer",
-    "condition": {
-      "name": "has_attribute_access",
-      "context": {
-        "attribute_name": "status",
-        "allowed_values": ["completed", "pending"]
-      }
-    }
-  }'
-```
-
-**Test:** Get combined row filter
-
-```bash
-curl -X POST {{baseUrl}}/permissions/row-filter \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "data_analyst",
-    "resource": {
-      "catalog_name": "lakekeeper_bronze",
-      "schema_name": "sales",
-      "table_name": "orders"
-    }
-  }'
-```
-
-**Expected Response:**
-
-```json
-{
-  "filter_expression": "(region IN ('north', 'south')) AND (status IN ('completed', 'pending'))",
-  "has_filter": true
-}
-```
-
-**Note:** Multiple filters are combined with AND logic.
-
----
-
-### 6.3. Test Permission with Missing Resource Fields
-
-**Test 1:** Grant permission without required fields (should fail)
-
-```bash
-curl -X POST {{baseUrl}}/permissions/grant \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "test_user",
-    "resource": {
-      "table": "user"
-    },
-    "relation": "select"
-  }'
-```
-
-**Expected:** HTTP 400 Bad Request
-
----
-
-### 6.4. Test Revoke Non-Existent Permission
-
-```bash
-curl -X POST {{baseUrl}}/permissions/revoke \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "non_existent_user",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "finance",
-      "table": "user"
-    },
-    "relation": "select"
-  }'
-```
-
-**Expected Response:**
-
-```json
-{
-  "success": true,
-  "user_id": "non_existent_user",
-  "resource_type": "table",
-  "resource_id": "lakekeeper_bronze.finance.user",
-  "object_id": "table:lakekeeper_bronze.finance.user",
-  "relation": "select"
-}
-```
-
-**Note:** Revoke operations are idempotent - revoking a non-existent permission is considered successful.
-
----
-
-### 6.5. Test All Supported Trino Operations
 
 **Operation Mapping Summary:**
 
@@ -1929,9 +1812,9 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 
 ---
 
-## 7. Database Verification
+## 9. Database Verification
 
-### 7.1. Check Tuples After Grant
+### 9.1. Check Tuples After Grant
 
 ```sql
 -- Check all tuples for a specific user
@@ -1947,7 +1830,7 @@ ORDER BY object_type, object_id;
 
 ---
 
-### 7.2. Check Row Filter Policy Tuples
+### 9.2. Check Row Filter Policy Tuples
 
 ```sql
 -- Check row filter policy tuples
@@ -1964,7 +1847,7 @@ ORDER BY object_id;
 
 ---
 
-### 7.3. Check Tuples After Revoke
+### 9.3. Check Tuples After Revoke
 
 ```sql
 -- Verify tuples are deleted after revoke
@@ -1978,7 +1861,7 @@ WHERE _user = 'user:hung' OR object_id LIKE '%user_region%';
 
 ---
 
-### 7.4. Count Tuples by User
+### 9.4. Count Tuples by User
 
 ```sql
 -- Count total tuples per user
@@ -1991,7 +1874,7 @@ ORDER BY tuple_count DESC;
 
 ---
 
-### 7.5. Count Tuples by Resource Type
+### 9.5. Count Tuples by Resource Type
 
 ```sql
 -- Count tuples by object type
@@ -2012,7 +1895,8 @@ ORDER BY tuple_count DESC;
 | Catalog-level   | 1 (user→catalog)               | `catalog`                                 |
 | Schema-level    | 1 (user→schema)                | `catalog`, `schema`                       |
 | Table-level     | 1 (user→table)                 | `catalog`, `schema`, `table`              |
-| Row filter      | 2 (user→policy + table→policy) | `catalog`, `schema`, `table`, `condition` |
+| Row filter      | 2 (user→policy + table→policy) | `catalog`, `schema`, `table`, `attribute_name`, `allowed_values` (use `/row-filter/grant`) |
+| Column mask     | 1 (user→column)                | `catalog`, `schema`, `table`, `column` (use `/column-mask/grant`) |
 
 ### Revoke Operations
 
@@ -2021,7 +1905,8 @@ ORDER BY tuple_count DESC;
 | Catalog-level   | 1 (user→catalog)               | None                               |
 | Schema-level    | 1 (user→schema)                | None                               |
 | Table-level     | 1 (user→table)                 | None                               |
-| Row filter      | 2 (user→policy + table→policy) | `condition.context.attribute_name` |
+| Row filter      | 2 (user→policy + table→policy) | `attribute_name` (use `/row-filter/revoke`) |
+| Column mask     | 1 (user→column)                | None (use `/column-mask/revoke`) |
 
 ### Supported Relations
 
@@ -2030,8 +1915,8 @@ ORDER BY tuple_count DESC;
 - **create**: Create new resources (`CREATE TABLE`, `CREATE SCHEMA`, etc.)
 - **describe**: View metadata (`SHOW TABLES`, `SHOW COLUMNS`, etc.)
 - **manage_grants**: Manage permissions on resources
-- **viewer**: Row filter policy viewer (with condition context)
-- **mask**: Column masking (future implementation)
+- **viewer**: Row filter policy viewer (with condition context) - use `/row-filter/grant` endpoint
+- **mask**: Column masking - use `/column-mask/grant` endpoint
 
 ### Key Features
 
@@ -2047,22 +1932,29 @@ ORDER BY tuple_count DESC;
 
 ### All Endpoints
 
-| Method | Endpoint                  | Purpose                              |
-| ------ | ------------------------- | ------------------------------------ |
-| GET    | `/health`                 | Health check                         |
-| POST   | `/permissions/grant`      | Grant permission to user             |
-| POST   | `/permissions/revoke`     | Revoke permission from user          |
-| POST   | `/permissions/check`      | Check if user has permission         |
-| POST   | `/permissions/row-filter` | Get row filter SQL for user on table |
+| Method | Endpoint                  | Purpose                                    |
+| ------ | ------------------------- | ------------------------------------------ |
+| GET    | `/health`                 | Health check                               |
+| POST   | `/permissions/grant`      | Grant permission to user (regular)         |
+| POST   | `/permissions/revoke`     | Revoke permission from user (regular)      |
+| POST   | `/permissions/check`      | Check if user has permission               |
+| POST   | `/row-filter/query`       | Get row filter SQL for user on table       |
+| POST   | `/row-filter/grant`       | Grant row filter policy to user            |
+| POST   | `/row-filter/revoke`      | Revoke row filter policy from user         |
+| POST   | `/row-filter/list`        | List row filter policies for user on table |
+| POST   | `/column-mask/grant`      | Grant column mask permission to user       |
+| POST   | `/column-mask/revoke`     | Revoke column mask permission from user    |
+| POST   | `/column-mask/list`       | List masked columns for user on table      |
 
 ### Common Test Flow
 
-1. **Grant permission** → `/permissions/grant`
+1. **Grant permission** → `/permissions/grant` (regular permissions) or `/row-filter/grant` (row filters) or `/column-mask/grant` (column masks)
 2. **Check permission** → `/permissions/check` (verify granted)
-3. **Get row filter** → `/permissions/row-filter` (if applicable)
-4. **Revoke permission** → `/permissions/revoke`
-5. **Check permission again** → `/permissions/check` (verify revoked)
-6. **Verify in database** → Query `tuple` table
+3. **Get row filter SQL** → `/row-filter/query` (if applicable)
+4. **List policies/masks** → `/row-filter/list` or `/column-mask/list` (if applicable)
+5. **Revoke permission** → `/permissions/revoke` (regular) or `/row-filter/revoke` (row filters) or `/column-mask/revoke` (column masks)
+6. **Check permission again** → `/permissions/check` (verify revoked)
+7. **Verify in database** → Query `tuple` table
 
 ---
 
@@ -2085,35 +1977,3 @@ API_PORT=8000
 ```
 
 ---
-
-## Testing Tools
-
-### cURL
-
-All examples in this guide use cURL for simplicity.
-
-### Postman
-
-Import the requests by:
-
-1. Create a new environment variable: `baseUrl = http://localhost:8000/api/v1`
-2. Copy-paste the request bodies
-3. Use `{{baseUrl}}` in all URLs
-
-### HTTPie
-
-Alternative syntax for HTTPie users:
-
-```bash
-# Grant permission
-http POST {{baseUrl}}/permissions/grant \
-  user_id=hung \
-  resource:='{"catalog":"lakekeeper_bronze","schema":"finance","table":"user"}' \
-  relation=select
-
-# Check permission
-http POST {{baseUrl}}/permissions/check \
-  user_id=hung \
-  operation=SelectFromColumns \
-  resource:='{"catalog_name":"lakekeeper_bronze","schema_name":"finance","table_name":"user"}'
-```

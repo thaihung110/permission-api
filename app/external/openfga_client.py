@@ -122,46 +122,6 @@ class OpenFGAManager:
             logger.error(f"Error checking permission in OpenFGA: {e}")
             return False
 
-    async def check_direct_permission(
-        self, user: str, relation: str, object_id: str
-    ) -> bool:
-        """
-        Check if user has DIRECT permission (excludes inheritance from parent resources)
-
-        This method checks for explicit tuples only, not inherited permissions.
-        Use this when you need to verify that permission was granted directly
-        on the resource, not inherited from parent (e.g., catalog -> schema -> table).
-
-        Args:
-            user: User identifier (e.g., "user:alice")
-            relation: Relation to check (e.g., "select")
-            object_id: Object identifier (e.g., "table:lakekeeper_bronze.finance.user")
-
-        Returns:
-            True if direct tuple exists, False otherwise (even if inherited permission exists)
-        """
-        if not self.client:
-            raise RuntimeError("OpenFGA client not initialized")
-
-        try:
-            # Read tuples to check for direct permission (not inherited)
-            tuples = await self.read_tuples(
-                user=user, relation=relation, object_id=object_id
-            )
-
-            has_direct_permission = len(tuples) > 0
-
-            logger.debug(
-                f"OpenFGA direct check: user={user}, relation={relation}, "
-                f"object={object_id}, has_direct={has_direct_permission}"
-            )
-
-            return has_direct_permission
-
-        except Exception as e:
-            logger.error(f"Error checking direct permission in OpenFGA: {e}")
-            return False
-
     async def grant_permission(
         self,
         user: str,
@@ -332,6 +292,10 @@ class OpenFGAManager:
                 elif relation == "viewer" and user.startswith("user:"):
                     # Pattern: "row_filter_policy:" matches all row_filter_policy objects
                     read_request_kwargs["object"] = "row_filter_policy:"
+                # For mask relation with user, we're querying user's column mask permissions
+                elif relation == "mask" and user.startswith("user:"):
+                    # Pattern: "column:" matches all column objects
+                    read_request_kwargs["object"] = "column:"
                 else:
                     # For other relations, try to infer object type or use wildcard
                     # Default to empty string - OpenFGA will handle pattern matching

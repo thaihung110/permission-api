@@ -30,6 +30,8 @@ We want to grant user `data_analyst` access to the `lakekeeper_bronze.finance.tr
 
 First, grant basic SELECT permission on the table.
 
+**Note:** Regular permissions (select, modify, create, describe, manage_grants) use the `/permissions/grant` endpoint. Row filter policies and column masks use dedicated endpoints (see Steps 2 and 3).
+
 ### Request
 
 ```bash
@@ -71,10 +73,12 @@ user:data_analyst --select--> table:lakekeeper_bronze.finance.transactions
 
 Grant row filter to restrict data access to specific regions.
 
+**Note:** This example uses the dedicated `/row-filter/grant` endpoint, which is the recommended way to grant row filter policies.
+
 ### Request
 
 ```bash
-curl -X POST {{baseUrl}}/permissions/grant \
+curl -X POST {{baseUrl}}/row-filter/grant \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "data_analyst",
@@ -83,13 +87,54 @@ curl -X POST {{baseUrl}}/permissions/grant \
       "schema": "finance",
       "table": "transactions"
     },
-    "relation": "viewer",
-    "condition": {
-      "name": "has_attribute_access",
-      "context": {
-        "attribute_name": "region",
-        "allowed_values": ["north", "central"]
-      }
+    "attribute_name": "region",
+    "allowed_values": ["north", "central"]
+  }'
+```
+
+### Expected Response
+
+```json
+{
+  "success": true,
+  "user_id": "data_analyst",
+  "policy_id": "transactions_region_filter",
+  "object_id": "row_filter_policy:transactions_region_filter",
+  "table_fqn": "lakekeeper_bronze.finance.transactions",
+  "attribute_name": "region",
+  "relation": "viewer"
+}
+```
+
+### OpenFGA Tuples Created
+
+```
+user:data_analyst --viewer--> row_filter_policy:transactions_region_filter
+  (with condition: has_attribute_access, context: {"attribute_name": "region", "allowed_values": ["north", "central"]})
+
+table:lakekeeper_bronze.finance.transactions --applies_to--> row_filter_policy:transactions_region_filter
+```
+
+---
+
+## Step 3: Grant Column Mask Permission (Account Number)
+
+Mask the sensitive `account_number` column.
+
+**Note:** This example uses the dedicated `/column-mask/grant` endpoint, which is the recommended way to grant column mask permissions.
+
+### Request
+
+```bash
+curl -X POST {{baseUrl}}/column-mask/grant \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "data_analyst",
+    "resource": {
+      "catalog": "lakekeeper_bronze",
+      "schema": "finance",
+      "table": "transactions",
+      "column": "account_number"
     }
   }'
 ```
@@ -100,53 +145,7 @@ curl -X POST {{baseUrl}}/permissions/grant \
 {
   "success": true,
   "user_id": "data_analyst",
-  "resource_type": "row_filter_policy",
-  "resource_id": "lakekeeper_bronze.finance.transactions_region_filter",
-  "object_id": "row_filter_policy:lakekeeper_bronze.finance.transactions_region_filter",
-  "relation": "viewer"
-}
-```
-
-### OpenFGA Tuples Created
-
-```
-user:data_analyst --viewer--> row_filter_policy:lakekeeper_bronze.finance.transactions_region_filter
-  (with condition: has_attribute_access, context: {"attribute_name": "region", "allowed_values": ["north", "central"]})
-
-table:lakekeeper_bronze.finance.transactions --applies_to--> row_filter_policy:lakekeeper_bronze.finance.transactions_region_filter
-```
-
----
-
-## Step 3: Grant Column Mask Permission (Account Number)
-
-Mask the sensitive `account_number` column.
-
-### Request
-
-```bash
-curl -X POST {{baseUrl}}/permissions/grant \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "data_analyst",
-    "resource": {
-      "catalog": "lakekeeper_bronze",
-      "schema": "finance",
-      "table": "transactions",
-      "column": "account_number"
-    },
-    "relation": "mask"
-  }'
-```
-
-### Expected Response
-
-```json
-{
-  "success": true,
-  "user_id": "data_analyst",
-  "resource_type": "column",
-  "resource_id": "lakekeeper_bronze.finance.transactions.account_number",
+  "column_id": "lakekeeper_bronze.finance.transactions.account_number",
   "object_id": "column:lakekeeper_bronze.finance.transactions.account_number",
   "relation": "mask"
 }
@@ -313,10 +312,12 @@ curl -X POST {{baseUrl}}/permissions/check \
 
 Retrieve the row filter SQL expression for the user.
 
+**Note:** This endpoint has been moved from `/permissions/row-filter` to `/row-filter/query`.
+
 ### Request
 
 ```bash
-curl -X POST {{baseUrl}}/permissions/row-filter \
+curl -X POST {{baseUrl}}/row-filter/query \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "data_analyst",
@@ -347,7 +348,89 @@ curl -X POST {{baseUrl}}/permissions/row-filter \
 
 ---
 
-## Step 9: Check User Without Permissions
+## Step 9: List Row Filter Policies
+
+List all row filter policies that the user has access to on the table.
+
+### Request
+
+```bash
+curl -X POST {{baseUrl}}/row-filter/list \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "data_analyst",
+    "resource": {
+      "catalog_name": "lakekeeper_bronze",
+      "schema_name": "finance",
+      "table_name": "transactions"
+    }
+  }'
+```
+
+### Expected Response
+
+```json
+{
+  "user_id": "data_analyst",
+  "table_fqn": "lakekeeper_bronze.finance.transactions",
+  "policies": [
+    {
+      "policy_id": "transactions_region_filter",
+      "attribute_name": "region",
+      "allowed_values": ["north", "central"]
+    }
+  ],
+  "count": 1
+}
+```
+
+### Explanation
+
+- Queries OpenFGA for all row filter policies linked to the table
+- Checks which policies the user has `viewer` access to
+- Returns policy details including `attribute_name` and `allowed_values`
+
+---
+
+## Step 10: List Masked Columns
+
+List all columns that are masked for the user on the table.
+
+### Request
+
+```bash
+curl -X POST {{baseUrl}}/column-mask/list \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "data_analyst",
+    "resource": {
+      "catalog_name": "lakekeeper_bronze",
+      "schema_name": "finance",
+      "table_name": "transactions"
+    }
+  }'
+```
+
+### Expected Response
+
+```json
+{
+  "user_id": "data_analyst",
+  "table_fqn": "lakekeeper_bronze.finance.transactions",
+  "masked_columns": ["account_number"],
+  "count": 1
+}
+```
+
+### Explanation
+
+- Queries OpenFGA for all `mask` relation tuples for the user
+- Filters columns that belong to the specified table
+- Returns list of column names that are masked
+
+---
+
+## Step 11: Check User Without Permissions
 
 Verify that an unauthorized user cannot access the table.
 
@@ -384,11 +467,16 @@ curl -X POST {{baseUrl}}/permissions/check \
 
 ## Summary of Permissions Granted
 
-| Permission Type | User           | Resource                                                | Relation/Policy          | Effect                                               |
+| Permission Type | User           | Resource                                                | Endpoint Used            | Effect                                               |
 | --------------- | -------------- | ------------------------------------------------------- | ------------------------ | ---------------------------------------------------- |
-| Table Select    | `data_analyst` | `lakekeeper_bronze.finance.transactions`                | `select`                 | Can query the table                                  |
-| Row Filter      | `data_analyst` | `lakekeeper_bronze.finance.transactions`                | `viewer` (region filter) | Only see rows where `region IN ('north', 'central')` |
-| Column Mask     | `data_analyst` | `lakekeeper_bronze.finance.transactions.account_number` | `mask`                   | `account_number` column is masked                    |
+| Table Select    | `data_analyst` | `lakekeeper_bronze.finance.transactions`                | `/permissions/grant`     | Can query the table                                  |
+| Row Filter      | `data_analyst` | `lakekeeper_bronze.finance.transactions`                | `/row-filter/grant`      | Only see rows where `region IN ('north', 'central')` |
+| Column Mask     | `data_analyst` | `lakekeeper_bronze.finance.transactions.account_number` | `/column-mask/grant`     | `account_number` column is masked                    |
+
+**Note:** 
+- Regular permissions (select, modify, create, describe, manage_grants) use `/permissions/grant` and `/permissions/revoke`
+- Row filter policies use `/row-filter/grant` and `/row-filter/revoke`
+- Column mask permissions use `/column-mask/grant` and `/column-mask/revoke`
 
 ---
 
@@ -422,13 +510,15 @@ After all grants, the following tuples exist in OpenFGA:
 ```
 1. user:data_analyst --select--> table:lakekeeper_bronze.finance.transactions
 
-2. user:data_analyst --viewer--> row_filter_policy:lakekeeper_bronze.finance.transactions_region_filter
+2. user:data_analyst --viewer--> row_filter_policy:transactions_region_filter
    (condition: has_attribute_access, context: {"attribute_name": "region", "allowed_values": ["north", "central"]})
 
-3. table:lakekeeper_bronze.finance.transactions --applies_to--> row_filter_policy:lakekeeper_bronze.finance.transactions_region_filter
+3. table:lakekeeper_bronze.finance.transactions --applies_to--> row_filter_policy:transactions_region_filter
 
 4. user:data_analyst --mask--> column:lakekeeper_bronze.finance.transactions.account_number
 ```
+
+**Note:** Policy ID format is `{table_name}_{attribute_name}_filter` (e.g., `transactions_region_filter`).
 
 ---
 
@@ -437,6 +527,8 @@ After all grants, the following tuples exist in OpenFGA:
 To revoke all permissions and return to initial state:
 
 ### Revoke Table Select Permission
+
+**Note:** Regular permissions use the `/permissions/revoke` endpoint.
 
 ```bash
 curl -X POST {{baseUrl}}/permissions/revoke \
@@ -454,8 +546,10 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 
 ### Revoke Row Filter Permission
 
+**Note:** Use the dedicated `/row-filter/revoke` endpoint for revoking row filter policies. The old `/permissions/revoke` endpoint with `relation="viewer"` is deprecated.
+
 ```bash
-curl -X POST {{baseUrl}}/permissions/revoke \
+curl -X POST {{baseUrl}}/row-filter/revoke \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "data_analyst",
@@ -464,21 +558,19 @@ curl -X POST {{baseUrl}}/permissions/revoke \
       "schema": "finance",
       "table": "transactions"
     },
-    "relation": "viewer",
-    "condition": {
-      "name": "has_attribute_access",
-      "context": {
-        "attribute_name": "region",
-        "allowed_values": []
-      }
-    }
+    "attribute_name": "region",
+    "allowed_values": []
   }'
 ```
 
+**Note:** `allowed_values` can be empty for revoke (not used in deletion). The system uses `attribute_name` to build policy_id: `{table}_{attribute}_filter`.
+
 ### Revoke Column Mask Permission
 
+**Note:** Use the dedicated `/column-mask/revoke` endpoint for revoking column mask permissions. The old `/permissions/revoke` endpoint with `relation="mask"` is deprecated.
+
 ```bash
-curl -X POST {{baseUrl}}/permissions/revoke \
+curl -X POST {{baseUrl}}/column-mask/revoke \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "data_analyst",
@@ -487,8 +579,7 @@ curl -X POST {{baseUrl}}/permissions/revoke \
       "schema": "finance",
       "table": "transactions",
       "column": "account_number"
-    },
-    "relation": "mask"
+    }
   }'
 ```
 
@@ -501,29 +592,83 @@ curl -X POST {{baseUrl}}/permissions/revoke \
 │                    GRANT PERMISSIONS                         │
 └─────────────────────────────────────────────────────────────┘
                             ↓
-    Step 1: Grant SELECT on table → Allow data access
+    Step 1: Grant SELECT on table
+            Endpoint: POST /permissions/grant
+            → Allow data access
                             ↓
-    Step 2: Grant ROW FILTER → Restrict to regions
+    Step 2: Grant ROW FILTER
+            Endpoint: POST /row-filter/grant
+            → Restrict to regions (region IN ('north', 'central'))
                             ↓
-    Step 3: Grant COLUMN MASK → Mask sensitive columns
+    Step 3: Grant COLUMN MASK
+            Endpoint: POST /column-mask/grant
+            → Mask sensitive columns (account_number)
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                    CHECK PERMISSIONS                         │
 └─────────────────────────────────────────────────────────────┘
                             ↓
-    Step 4: Check AccessCatalog → ✅ Allowed (hierarchical)
+    Step 4: Check AccessCatalog
+            Endpoint: POST /permissions/check
+            → ✅ Allowed (hierarchical)
                             ↓
-    Step 5: Check SelectFromColumns → ✅ Allowed
+    Step 5: Check SelectFromColumns
+            Endpoint: POST /permissions/check
+            → ✅ Allowed
                             ↓
-    Step 6: Check MaskColumn (account_number) → ✅ Should mask
+    Step 6: Check MaskColumn (account_number)
+            Endpoint: POST /permissions/check
+            → ✅ Should mask
                             ↓
-    Step 7: Check MaskColumn (amount) → ❌ Should NOT mask
+    Step 7: Check MaskColumn (amount)
+            Endpoint: POST /permissions/check
+            → ❌ Should NOT mask
                             ↓
-    Step 8: Get Row Filter SQL → "region IN ('north', 'central')"
+    Step 8: Get Row Filter SQL
+            Endpoint: POST /row-filter/query
+            → "region IN ('north', 'central')"
                             ↓
-    Step 9: Check Unauthorized User → ❌ Denied
+    Step 9: List Row Filter Policies
+            Endpoint: POST /row-filter/list
+            → Show policies for user
+                            ↓
+    Step 10: List Masked Columns
+             Endpoint: POST /column-mask/list
+             → Show masked columns for user
+                            ↓
+    Step 11: Check Unauthorized User
+             Endpoint: POST /permissions/check
+             → ❌ Denied
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                    CLEANUP (Optional)                        │
 └─────────────────────────────────────────────────────────────┘
+                            ↓
+    Revoke SELECT: POST /permissions/revoke
+                            ↓
+    Revoke ROW FILTER: POST /row-filter/revoke
+                            ↓
+    Revoke COLUMN MASK: POST /column-mask/revoke
 ```
+
+## Endpoint Summary
+
+| Operation              | Endpoint                    | Purpose                                    |
+| ---------------------- | --------------------------- | ------------------------------------------ |
+| Grant regular permission | `/permissions/grant`      | Grant select, modify, create, describe, etc |
+| Grant row filter       | `/row-filter/grant`        | Grant row filter policy                    |
+| Grant column mask      | `/column-mask/grant`        | Grant column mask permission               |
+| Check permission       | `/permissions/check`       | Check if user has permission               |
+| Get row filter SQL     | `/row-filter/query`        | Get SQL filter expression                  |
+| List row filter policies | `/row-filter/list`        | List policies for user on table            |
+| List masked columns    | `/column-mask/list`         | List masked columns for user on table      |
+| Revoke regular permission | `/permissions/revoke`    | Revoke regular permissions                 |
+| Revoke row filter      | `/row-filter/revoke`       | Revoke row filter policy                   |
+| Revoke column mask     | `/column-mask/revoke`       | Revoke column mask permission              |
+
+**Important Notes:**
+
+- **Regular permissions** (select, modify, create, describe, manage_grants) use `/permissions/grant` and `/permissions/revoke`
+- **Row filter policies** use `/row-filter/grant` and `/row-filter/revoke` (deprecated: `/permissions/grant` with `relation="viewer"`)
+- **Column mask permissions** use `/column-mask/grant` and `/column-mask/revoke` (deprecated: `/permissions/grant` with `relation="mask"`)
+- **Row filter SQL query** uses `/row-filter/query` (deprecated: `/permissions/row-filter`)

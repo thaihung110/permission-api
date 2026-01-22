@@ -4,7 +4,7 @@ API Router - Combines all v1 endpoints
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import health, permissions, row_filter
+from app.api.v1.endpoints import column_mask, health, permissions, row_filter
 
 api_router = APIRouter()
 
@@ -16,7 +16,12 @@ api_router.include_router(
     permissions.router, prefix="/permissions", tags=["Permissions"]
 )
 
-# Include row filter endpoints with /permissions prefix
+# Include row filter endpoints with /row-filter prefix
 api_router.include_router(
-    row_filter.router, prefix="/permissions", tags=["Row Filters"]
+    row_filter.router, prefix="/row-filter", tags=["Row Filter Policies"]
+)
+
+# Include column mask endpoints with /column-mask prefix
+api_router.include_router(
+    column_mask.router, prefix="/column-mask", tags=["Column Masks"]
 )

@@ -300,28 +300,11 @@ class PermissionService:
 
         resource = grant.resource
 
-        # Check if this is row filtering (condition with viewer relation)
-        is_row_filtering = (
-            grant.condition is not None
-            and grant.relation == "viewer"
-            and grant.condition.name == "has_attribute_access"
+        # Build normal resource identifier
+        # Note: Row filter policies should use /row-filter/grant endpoint instead
+        object_id, resource_type, resource_id = (
+            self._build_resource_identifiers(resource, grant.relation)
         )
-
-        if is_row_filtering:
-            # Row filtering: build row_filter_policy object_id
-            object_id, resource_type, resource_id = (
-                self._build_row_filter_policy_identifier(
-                    resource, grant.condition.context
-                )
-            )
-
-            # Ensure policy-to-table link exists
-            await self._ensure_policy_table_link(resource, object_id)
-        else:
-            # Regular permission: build normal resource identifier
-            object_id, resource_type, resource_id = (
-                self._build_resource_identifiers(resource, grant.relation)
-            )
 
         # Build user identifier
         user = build_user_identifier(grant.user_id)
@@ -384,70 +367,18 @@ class PermissionService:
 
         resource = revoke.resource
 
-        # Check if this is row filtering revoke (condition with viewer relation)
-        is_row_filtering = (
-            revoke.condition is not None
-            and revoke.relation == "viewer"
-            and revoke.condition.name == "has_attribute_access"
+        # Build normal resource identifier
+        # Note: Row filter policies should use /row-filter/revoke endpoint instead
+        object_id, resource_type, resource_id = (
+            self._build_resource_identifiers(resource, revoke.relation)
         )
 
-        if is_row_filtering:
-            # Row filtering: build row_filter_policy object_id using the same logic as grant
-            object_id, resource_type, resource_id = (
-                self._build_row_filter_policy_identifier(
-                    resource, revoke.condition.context
-                )
-            )
+        # Build user identifier
+        user = build_user_identifier(revoke.user_id)
 
-            logger.info(
-                f"Detected row filter revoke: removing policy {object_id} and table link"
-            )
-
-            # Build user identifier
-            user = build_user_identifier(revoke.user_id)
-
-            # 1. Revoke user's viewer permission on the row_filter_policy
-            await self.openfga.revoke_permission(
-                user, revoke.relation, object_id
-            )
-            logger.info(
-                f"Revoked viewer permission: user={user}, policy={object_id}"
-            )
-
-            # 2. Remove table-to-policy link (applies_to relation)
-            schema_name = resource.schema
-            if resource.catalog and schema_name and resource.table:
-                table_fqn = f"{resource.catalog}.{schema_name}.{resource.table}"
-                table_object_id = f"table:{table_fqn}"
-
-                try:
-                    # Remove the applies_to link: table --applies_to--> row_filter_policy
-                    await self.openfga.revoke_permission(
-                        user=table_object_id,
-                        relation="applies_to",
-                        object_id=object_id,
-                    )
-                    logger.info(
-                        f"Removed table-to-policy link: {table_object_id} --applies_to--> {object_id}"
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Error removing table-to-policy link (may not exist): {e}"
-                    )
-        else:
-            # Regular permission: build normal resource identifier
-            object_id, resource_type, resource_id = (
-                self._build_resource_identifiers(resource, revoke.relation)
-            )
-
-            # Build user identifier
-            user = build_user_identifier(revoke.user_id)
-
-            # Revoke permission in OpenFGA
-            await self.openfga.revoke_permission(
-                user, revoke.relation, object_id
-            )
-            logger.info(f"Permission revoked: user={user}, object={object_id}")
+        # Revoke permission in OpenFGA
+        await self.openfga.revoke_permission(user, revoke.relation, object_id)
+        logger.info(f"Permission revoked: user={user}, object={object_id}")
 
         return PermissionRevokeResponse(
             success=True,
@@ -480,100 +411,3 @@ class PermissionService:
         return build_resource_identifiers(
             resource, relation, raise_on_error=True
         )
-
-    def _build_row_filter_policy_identifier(
-        self, resource, condition_context
-    ) -> Tuple[str, str, str]:
-        """
-        Build row_filter_policy identifier from resource and condition context
-
-        Policy ID format: {table_name}_{attribute_name}_filter
-        Example: "user_region_filter" for table "user" and attribute "region"
-
-        Args:
-            resource: Resource specification (must have catalog, schema, table)
-            condition_context: ConditionContext with attribute_name
-
-        Returns:
-            Tuple of (object_id, resource_type, resource_id)
-
-        Raises:
-            ValueError: If resource or condition context is invalid
-        """
-        # Validate resource has table information
-        schema_name = resource.schema
-        if not (resource.catalog and schema_name and resource.table):
-            raise ValueError(
-                "Row filter policy requires catalog, schema, and table. "
-                'Example: {"catalog": "lakekeeper_bronze", "schema": "finance", "table": "user"}'
-            )
-
-        # Get attribute name from condition context
-        attribute_name = condition_context.attribute_name
-        if not attribute_name:
-            raise ValueError(
-                "Row filter condition context must include attribute_name. "
-                'Example: {"attribute_name": "region", "allowed_values": ["north"]}'
-            )
-
-        # Build policy ID: {table_name}_{attribute_name}_filter
-        table_name = resource.table
-        policy_id = f"{table_name}_{attribute_name}_filter"
-
-        # Build object_id
-        object_id = f"row_filter_policy:{policy_id}"
-        resource_type = "row_filter_policy"
-        resource_id = policy_id
-
-        logger.info(
-            f"Built row filter policy identifier: policy_id={policy_id}, "
-            f"table={resource.catalog}.{schema_name}.{table_name}, "
-            f"attribute={attribute_name}"
-        )
-
-        return object_id, resource_type, resource_id
-
-    async def _ensure_policy_table_link(self, resource, policy_object_id: str):
-        """
-        Ensure policy-to-table link exists in OpenFGA
-
-        Creates tuple: table:{catalog}.{schema}.{table} --applies_to--> row_filter_policy:{policy_id}
-
-        Args:
-            resource: Resource specification
-            policy_object_id: Policy object ID (e.g., "row_filter_policy:user_region_filter")
-        """
-        try:
-            schema_name = resource.schema
-            table_fqn = f"{resource.catalog}.{schema_name}.{resource.table}"
-            table_object_id = f"table:{table_fqn}"
-
-            # Check if link already exists
-            existing_tuples = await self.openfga.read_tuples(
-                user=table_object_id,
-                relation="applies_to",
-                object_id=policy_object_id,
-            )
-
-            if existing_tuples:
-                logger.debug(
-                    f"Policy-to-table link already exists: {table_object_id} --applies_to--> {policy_object_id}"
-                )
-                return
-
-            # Create the link
-            await self.openfga.grant_permission(
-                user=table_object_id,
-                relation="applies_to",
-                object_id=policy_object_id,
-            )
-
-            logger.info(
-                f"Created policy-to-table link: {table_object_id} --applies_to--> {policy_object_id}"
-            )
-
-        except Exception as e:
-            logger.warning(
-                f"Error ensuring policy-table link (may already exist): {e}"
-            )
-            # Don't fail the grant if link creation fails - it might already exist
