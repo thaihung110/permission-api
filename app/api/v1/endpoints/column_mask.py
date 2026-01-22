@@ -7,6 +7,8 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 
 from app.schemas.column_mask import (
+    BatchColumnMaskRequest,
+    BatchColumnMaskResponse,
     ColumnMaskGrant,
     ColumnMaskGrantResponse,
     ColumnMaskListRequest,
@@ -221,3 +223,95 @@ async def list_masked_columns(
             masked_columns=[],
             count=0,
         )
+
+
+@router.post("/query", response_model=BatchColumnMaskResponse)
+async def batch_check_column_masks(
+    request_data: BatchColumnMaskRequest,
+    request: Request,
+):
+    """
+    Batch check which columns need masking for a user (Trino integration).
+
+    This endpoint accepts Trino's batch column mask request format and returns
+    which columns need masking with their viewExpression. This replaces the OPA
+    layer for column masking, allowing Trino to call the permission API directly.
+
+    Example:
+        POST /column-mask/query
+        {
+          "input": {
+            "context": {
+              "identity": {
+                "user": "hung",
+                "groups": []
+              }
+            },
+            "action": {
+              "operation": "GetColumnMask",
+              "filterResources": [
+                {
+                  "column": {
+                    "catalogName": "lakekeeper_bronze",
+                    "schemaName": "finance",
+                    "tableName": "user",
+                    "columnName": "phone_number",
+                    "columnType": "varchar"
+                  }
+                }
+              ]
+            }
+          }
+        }
+
+    Response:
+        {
+          "result": [
+            {
+              "index": 0,
+              "viewExpression": {
+                "expression": "******"
+              }
+            }
+          ]
+        }
+    """
+    try:
+        logger.info(
+            f"[ENDPOINT] Received batch column mask request: "
+            f"user={request_data.input.context.identity.user}, "
+            f"columns={len(request_data.input.action.filterResources)}"
+        )
+
+        openfga = request.app.state.openfga
+        service = ColumnMaskService(openfga)
+        result = await service.batch_check_column_masks(request_data)
+
+        # Log response details for tracking
+        if result.result:
+            result_details = [
+                {
+                    "index": entry.index,
+                    "expression": entry.viewExpression.expression,
+                }
+                for entry in result.result
+            ]
+            logger.info(
+                f"[ENDPOINT] Batch column mask check completed: "
+                f"user={request_data.input.context.identity.user}, "
+                f"masked_columns={len(result.result)}, "
+                f"result={result_details}"
+            )
+        else:
+            logger.info(
+                f"[ENDPOINT] Batch column mask check completed: "
+                f"user={request_data.input.context.identity.user}, "
+                f"masked_columns=0, result=[]"
+            )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in batch column mask check: {e}", exc_info=True)
+        # Return empty result on error (fail gracefully)
+        return BatchColumnMaskResponse(result=[])

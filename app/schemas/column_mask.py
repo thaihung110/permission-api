@@ -2,7 +2,7 @@
 Column mask related Pydantic schemas
 """
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -142,5 +142,139 @@ class ColumnMaskListResponse(BaseModel):
                 "table_fqn": "lakekeeper_bronze.finance.user",
                 "masked_columns": ["email", "phone_number"],
                 "count": 2,
+            }
+        }
+
+
+# Batch Column Mask Schemas (for Trino direct integration)
+
+
+class ColumnResource(BaseModel):
+    """Column resource specification from Trino"""
+
+    catalogName: str = Field(..., description="Catalog name")
+    schemaName: str = Field(..., description="Schema name")
+    tableName: str = Field(..., description="Table name")
+    columnName: str = Field(..., description="Column name")
+    columnType: str = Field(
+        ..., description="Column type (e.g., 'varchar', 'integer')"
+    )
+
+
+class FilterResource(BaseModel):
+    """Filter resource containing a column"""
+
+    column: ColumnResource = Field(..., description="Column resource")
+
+
+class IdentityContext(BaseModel):
+    """Identity context from Trino request"""
+
+    user: str = Field(..., description="User identifier")
+    groups: List[str] = Field(default_factory=list, description="User groups")
+
+
+class Context(BaseModel):
+    """Context from Trino request"""
+
+    identity: IdentityContext = Field(..., description="Identity information")
+    softwareStack: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Software stack information (e.g., {'trinoVersion': '467'})",
+    )
+
+
+class Action(BaseModel):
+    """Action from Trino request"""
+
+    operation: str = Field(
+        ..., description="Operation name (e.g., 'GetColumnMask')"
+    )
+    filterResources: List[FilterResource] = Field(
+        ..., description="Array of column resources to check"
+    )
+
+
+class BatchColumnMaskInput(BaseModel):
+    """Input wrapper for batch column mask request"""
+
+    context: Context = Field(..., description="Request context")
+    action: Action = Field(..., description="Action with filter resources")
+
+
+class BatchColumnMaskRequest(BaseModel):
+    """Request model for batch column mask check (Trino format)"""
+
+    input: BatchColumnMaskInput = Field(..., description="Input data")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "input": {
+                    "context": {
+                        "identity": {
+                            "user": "hung",
+                            "groups": [],
+                        },
+                        "softwareStack": {
+                            "trinoVersion": "467",
+                        },
+                    },
+                    "action": {
+                        "operation": "GetColumnMask",
+                        "filterResources": [
+                            {
+                                "column": {
+                                    "catalogName": "lakekeeper_bronze",
+                                    "schemaName": "finance",
+                                    "tableName": "user",
+                                    "columnName": "phone_number",
+                                    "columnType": "varchar",
+                                }
+                            }
+                        ],
+                    },
+                }
+            }
+        }
+
+
+class ViewExpression(BaseModel):
+    """View expression for column masking"""
+
+    expression: str = Field(
+        ..., description="SQL expression to mask the column (e.g., '******')"
+    )
+
+
+class MaskEntry(BaseModel):
+    """Mask entry for a column that needs masking"""
+
+    index: int = Field(
+        ..., description="Index of the column in filterResources array"
+    )
+    viewExpression: ViewExpression = Field(
+        ..., description="View expression for masking"
+    )
+
+
+class BatchColumnMaskResponse(BaseModel):
+    """Response model for batch column mask check"""
+
+    result: List[MaskEntry] = Field(
+        ...,
+        description="Array of mask entries for columns that need masking",
+        default_factory=list,
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "result": [
+                    {
+                        "index": 2,
+                        "viewExpression": {"expression": "******"},
+                    }
+                ]
             }
         }

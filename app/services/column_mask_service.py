@@ -6,7 +6,15 @@ import logging
 from typing import List
 
 from app.external.openfga_client import OpenFGAManager
-from app.schemas.column_mask import ColumnMaskGrant, ColumnMaskGrantResponse
+from app.schemas.column_mask import (
+    BatchColumnMaskRequest,
+    BatchColumnMaskResponse,
+    ColumnMaskGrant,
+    ColumnMaskGrantResponse,
+    MaskEntry,
+    ViewExpression,
+)
+from app.schemas.permission import ResourceSpec
 from app.utils.operation_mapper import build_user_identifier
 from app.utils.resource_builder import build_resource_identifiers
 
@@ -223,3 +231,145 @@ class ColumnMaskService:
             )
             # Return empty list on error (fail gracefully)
             return []
+
+    async def batch_check_column_masks(
+        self, request: BatchColumnMaskRequest
+    ) -> BatchColumnMaskResponse:
+        """
+        Batch check which columns need masking for a user.
+
+        This method processes multiple columns in a single request and returns
+        which columns need masking with their viewExpression.
+
+        Args:
+            request: Batch column mask request from Trino
+
+        Returns:
+            Batch column mask response with mask entries for columns that need masking
+        """
+        logger.info(
+            f"Batch checking column masks: user={request.input.context.identity.user}, "
+            f"columns={len(request.input.action.filterResources)}"
+        )
+
+        try:
+            # Extract user_id from context
+            user_id = request.input.context.identity.user
+            user = build_user_identifier(user_id)
+
+            # Validate operation
+            if request.input.action.operation != "GetColumnMask":
+                logger.warning(
+                    f"Unexpected operation: {request.input.action.operation}, "
+                    "expected 'GetColumnMask'"
+                )
+
+            mask_entries = []
+
+            # Process each column in filterResources
+            for index, filter_resource in enumerate(
+                request.input.action.filterResources
+            ):
+                column = filter_resource.column
+
+                try:
+                    # Build resource spec from column object
+                    resource_spec = ResourceSpec(
+                        catalog=column.catalogName,
+                        schema=column.schemaName,
+                        table=column.tableName,
+                        column=column.columnName,
+                    )
+
+                    # Build column object_id using resource_builder
+                    result = build_resource_identifiers(
+                        resource_spec, "mask", raise_on_error=False
+                    )
+
+                    if not result:
+                        logger.debug(
+                            f"Could not build identifier for column {column.columnName} "
+                            f"at index {index}, skipping"
+                        )
+                        continue
+
+                    object_id, resource_type, resource_id = result
+
+                    # Verify it's a column resource
+                    if resource_type != "column":
+                        logger.debug(
+                            f"Expected column resource, got {resource_type} "
+                            f"for column {column.columnName} at index {index}, skipping"
+                        )
+                        continue
+
+                    # Check if user has mask permission on this column
+                    has_mask = await self.openfga.check_permission(
+                        user, "mask", object_id
+                    )
+
+                    logger.debug(
+                        f"Column check result: column={column.columnName}, "
+                        f"index={index}, object_id={object_id}, has_mask={has_mask}"
+                    )
+
+                    if has_mask:
+                        # Build SQL expression - mask entire column value
+                        # Format: '*****' (simple string literal that masks everything)
+                        mask_expression = "'*****'"
+
+                        logger.info(
+                            f"Column {column.columnName} at index {index} needs masking. "
+                            f"Expression: {mask_expression}"
+                        )
+
+                        # Add mask entry with SQL expression
+                        mask_entries.append(
+                            MaskEntry(
+                                index=index,
+                                viewExpression=ViewExpression(
+                                    expression=mask_expression
+                                ),
+                            )
+                        )
+                    else:
+                        logger.debug(
+                            f"Column {column.columnName} at index {index} does not need masking"
+                        )
+
+                except Exception as e:
+                    logger.warning(
+                        f"Error processing column {column.columnName} at index {index}: {e}",
+                        exc_info=True,
+                    )
+                    # Continue processing other columns even if one fails
+                    continue
+
+            logger.info(
+                f"Batch column mask check completed: user={user_id}, "
+                f"total_columns={len(request.input.action.filterResources)}, "
+                f"masked_columns={len(mask_entries)}"
+            )
+
+            # Log the response for debugging
+            if mask_entries:
+                result_details = [
+                    {
+                        "index": entry.index,
+                        "expression": entry.viewExpression.expression,
+                    }
+                    for entry in mask_entries
+                ]
+                logger.info(f"Returning mask entries: {result_details}")
+            else:
+                logger.info("No columns need masking, returning empty result")
+
+            return BatchColumnMaskResponse(result=mask_entries)
+
+        except Exception as e:
+            logger.error(
+                f"Error in batch column mask check: {e}",
+                exc_info=True,
+            )
+            # Return empty result on error (fail gracefully)
+            return BatchColumnMaskResponse(result=[])

@@ -68,3 +68,6 @@ policies/
 trino/
 
 notes/
+
+
+tests/
