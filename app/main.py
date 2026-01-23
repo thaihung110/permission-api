@@ -7,7 +7,6 @@ This service manages permissions for Lakekeeper resources using OpenFGA.
 import logging
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -34,21 +33,18 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Permission Management API...")
     try:
-        # Step 1: Setup OpenFGA (ensure store and model exist)
-        logger.info("Setting up OpenFGA store and authorization model...")
+        # Step 1: Validate OpenFGA (store and model must already exist)
+        logger.info("Validating OpenFGA store and authorization model...")
         setup = OpenFGASetup(api_url=settings.openfga_api_url)
 
-        # Path to authorization model file (OpenFGA v2)
-        auth_model_path = (
-            Path(__file__).parent.parent / "openfga_v2" / "auth_model_v2.json"
+        # Validate store and model exist (will fail if they don't)
+        # If OPENFGA_STORE_ID is set, validate that specific store
+        # Otherwise, will use the first available store
+        store_id = await setup.validate_store_and_model(
+            store_id=settings.openfga_store_id
         )
 
-        # Ensure store and model exist
-        store_id = await setup.ensure_store_and_model(
-            auth_model_path=str(auth_model_path)
-        )
-
-        # Update settings with discovered/created store_id
+        # Update settings with validated store_id
         if not settings.openfga_store_id:
             settings.openfga_store_id = store_id
             logger.info(f"Using OpenFGA store: {store_id}")

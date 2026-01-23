@@ -1,66 +1,68 @@
 """
-OpenFGA initialization and setup utilities
+OpenFGA validation utilities
 """
 
 import asyncio
-import json
 import logging
-import subprocess
-from pathlib import Path
 from typing import Optional
 
-import httpx
 from openfga_sdk.client import ClientConfiguration, OpenFgaClient
 
 logger = logging.getLogger(__name__)
 
 
 class OpenFGASetup:
-    """Handles OpenFGA store and authorization model setup"""
+    """Validates that OpenFGA store and authorization model exist"""
 
     def __init__(self, api_url: str):
         """
-        Initialize OpenFGA setup
+        Initialize OpenFGA validator
 
         Args:
             api_url: OpenFGA API URL
         """
         self.api_url = api_url
 
-    async def ensure_store_and_model(
-        self, auth_model_path: Optional[str] = None, max_retries: int = 5
+    async def validate_store_and_model(
+        self, store_id: Optional[str] = None, max_retries: int = 10
     ) -> str:
         """
-        Ensure OpenFGA store exists and authorization model is created
+        Validate that OpenFGA store exists and has authorization models
 
         Args:
-            auth_model_path: Path to .fga authorization model file
+            store_id: Optional specific store ID to validate. If not provided,
+                     will use the first available store.
             max_retries: Maximum number of connection retry attempts
 
         Returns:
             Store ID
+
+        Raises:
+            ValueError: If no store exists or no authorization models found
+            Exception: If connection to OpenFGA fails
         """
         # Retry logic for connecting to OpenFGA
         for attempt in range(1, max_retries + 1):
             try:
                 logger.info(
-                    f"Attempting to connect to OpenFGA (attempt {attempt}/{max_retries})..."
+                    f"Validating OpenFGA setup (attempt {attempt}/{max_retries})..."
                 )
 
-                # Create client without store_id for setup operations
+                # Create client without store_id for validation operations
                 config = ClientConfiguration(api_url=self.api_url)
                 async with OpenFgaClient(config) as client:
-                    # Step 1: Ensure store exists
-                    store_id = await self._ensure_store(client)
-                    logger.info(f"Using store: {store_id}")
+                    # Step 1: Validate store exists
+                    validated_store_id = await self._validate_store(
+                        client, store_id
+                    )
+                    logger.info(f"Validated store: {validated_store_id}")
 
-                    # Step 2: Ensure authorization model exists
-                    if auth_model_path:
-                        await self._ensure_authorization_model(
-                            client, store_id, auth_model_path
-                        )
+                    # Step 2: Validate authorization model exists
+                    await self._validate_authorization_model(
+                        client, validated_store_id
+                    )
 
-                    return store_id
+                    return validated_store_id
 
             except Exception as e:
                 if attempt < max_retries:
@@ -72,52 +74,66 @@ class OpenFGASetup:
                     await asyncio.sleep(wait_time)
                 else:
                     logger.error(
-                        f"Failed to connect to OpenFGA after {max_retries} attempts"
+                        f"Failed to validate OpenFGA setup after {max_retries} attempts"
                     )
                     raise
 
-    async def _ensure_store(self, client: OpenFgaClient) -> str:
+    async def _validate_store(
+        self, client: OpenFgaClient, store_id: Optional[str] = None
+    ) -> str:
         """
-        Ensure store exists, create if not
+        Validate that a store exists
 
         Args:
             client: OpenFGA client
+            store_id: Optional specific store ID to validate
 
         Returns:
             Store ID
+
+        Raises:
+            ValueError: If no store exists
         """
         try:
             # Check if stores exist
             response = await client.list_stores()
 
-            if response.stores and len(response.stores) > 0:
-                store_id = response.stores[0].id
-                logger.info(f"Found existing store: {store_id}")
+            if not response.stores or len(response.stores) == 0:
+                raise ValueError(
+                    "No OpenFGA stores found. Please run bootstrap script to create store and model."
+                )
+
+            # If specific store_id provided, validate it exists
+            if store_id:
+                store_ids = [store.id for store in response.stores]
+                if store_id not in store_ids:
+                    raise ValueError(
+                        f"Store ID '{store_id}' not found. Available stores: {store_ids}"
+                    )
+                logger.info(f"Validated specific store: {store_id}")
                 return store_id
 
-            # No stores found, create new one
-            logger.info("No stores found, creating new store...")
-            response = await client.create_store(
-                body={"name": "Permission Management Store"}
-            )
-            store_id = response.id
-            logger.info(f"Created new store: {store_id}")
+            # Use first available store
+            store_id = response.stores[0].id
+            logger.info(f"Using first available store: {store_id}")
             return store_id
 
         except Exception as e:
-            logger.error(f"Error ensuring store exists: {e}")
+            logger.error(f"Error validating store: {e}")
             raise
 
-    async def _ensure_authorization_model(
-        self, client: OpenFgaClient, store_id: str, auth_model_path: str
+    async def _validate_authorization_model(
+        self, client: OpenFgaClient, store_id: str
     ):
         """
-        Ensure authorization model exists, create if not
+        Validate that authorization model exists
 
         Args:
             client: OpenFGA client
             store_id: Store ID
-            auth_model_path: Path to .fga authorization model file
+
+        Raises:
+            ValueError: If no authorization model exists
         """
         try:
             # Reconfigure client with store_id for model operations
@@ -129,67 +145,22 @@ class OpenFGASetup:
                 response = await store_client.read_authorization_models()
 
                 if (
-                    hasattr(response, "authorization_models")
-                    and response.authorization_models
-                    and len(response.authorization_models) > 0
+                    not hasattr(response, "authorization_models")
+                    or not response.authorization_models
+                    or len(response.authorization_models) == 0
                 ):
-                    logger.info(
-                        f"Found {len(response.authorization_models)} existing authorization model(s)"
+                    raise ValueError(
+                        f"No authorization models found in store '{store_id}'. "
+                        "Please run bootstrap script to create authorization model."
                     )
-                    # Model already exists, no need to create
-                    return
 
-                # No model found, create from file
+                # Get the latest model ID (first in the list)
+                latest_model_id = response.authorization_models[0].id
                 logger.info(
-                    f"No authorization model found, creating from {auth_model_path}..."
+                    f"Validated {len(response.authorization_models)} authorization model(s) exist"
                 )
-
-                # Load JSON model
-                model_json = self._load_json_model(auth_model_path)
-
-                # Write using SDK
-                response = await store_client.write_authorization_model(
-                    model_json
-                )
-
-                model_id = response.authorization_model_id
-                logger.info(f"Created authorization model: {model_id}")
+                logger.info(f"Latest authorization model ID: {latest_model_id}")
 
         except Exception as e:
-            logger.error(f"Error ensuring authorization model: {e}")
-            raise
-
-    def _load_json_model(self, model_path: str) -> dict:
-        """
-        Load authorization model from JSON file
-
-        Args:
-            model_path: Path to model file (.fga or .json)
-
-        Returns:
-            Model as dict
-        """
-        try:
-            # Try .json file first, fallback to .fga path with .json extension
-            json_path = Path(model_path)
-            if json_path.suffix == ".fga":
-                # Replace .fga with .json
-                json_path = json_path.with_suffix(".json")
-
-            if not json_path.exists():
-                raise FileNotFoundError(
-                    f"JSON model file not found: {json_path}. "
-                    f"Please convert your .fga file to JSON format."
-                )
-
-            # Read and parse JSON
-            with open(json_path, "r") as f:
-                model_data = json.load(f)
-
-            logger.info(f"Loaded authorization model from {json_path}")
-
-            return model_data
-
-        except Exception as e:
-            logger.error(f"Error loading JSON model: {e}")
+            logger.error(f"Error validating authorization model: {e}")
             raise

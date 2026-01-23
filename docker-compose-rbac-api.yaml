@@ -81,6 +81,25 @@ services:
       - lakehouse-network
     restart: no
 
+  openfga-bootstrap-2:
+    image: alpine:latest
+    container_name: openfga-bootstrap-2
+    volumes:
+      - ./openfga_v2/auth_model_v2.json:/model.json:ro
+      - ./scripts/bootstrap_curl.sh:/bootstrap.sh:ro
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        apk add --no-cache curl jq
+        /bootstrap.sh
+    depends_on:
+      openfga-2:
+        condition: service_healthy
+    networks:
+      - lakehouse-network
+    restart: no
+
 volumes:
   openfga-db-data:
 
