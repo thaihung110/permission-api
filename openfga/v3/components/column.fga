@@ -1,0 +1,4 @@
+module column
+type column # module: lakekeeper-column, column-level masking
+  relations
+    define mask: [user, role#assignee]

@@ -1,0 +1,102 @@
+{
+  "schema_version": "1.2",
+  "type_definitions": [
+    {
+      "metadata": {
+        "module": "user",
+        "source_info": { "file": "components/user.fga" }
+      },
+      "type": "user"
+    },
+    {
+      "metadata": {
+        "module": "table",
+        "source_info": { "file": "components/table.fga" }
+      },
+      "type": "table"
+    },
+    {
+      "metadata": {
+        "module": "column",
+        "relations": {
+          "mask": {
+            "directly_related_user_types": [
+              { "type": "user" },
+              { "relation": "assignee", "type": "role" }
+            ]
+          }
+        },
+        "source_info": { "file": "components/column.fga" }
+      },
+      "relations": { "mask": { "this": {} } },
+      "type": "column"
+    },
+    {
+      "metadata": {
+        "module": "row_filter_policy",
+        "relations": {
+          "applies_to": {
+            "directly_related_user_types": [{ "type": "table" }]
+          },
+          "viewer": {
+            "directly_related_user_types": [
+              { "condition": "has_attribute_access", "type": "user" }
+            ]
+          }
+        },
+        "source_info": { "file": "components/row_filter_policy.fga" }
+      },
+      "relations": { "applies_to": { "this": {} }, "viewer": { "this": {} } },
+      "type": "row_filter_policy"
+    },
+    {
+      "metadata": {
+        "module": "lakekeeper-role",
+        "relations": {
+          "assignee": {
+            "directly_related_user_types": [
+              { "type": "user" },
+              { "relation": "assignee", "type": "role" }
+            ]
+          },
+          "ownership": {
+            "directly_related_user_types": [
+              { "type": "user" },
+              { "relation": "assignee", "type": "role" }
+            ]
+          }
+        },
+        "source_info": { "file": "components/role.fga" }
+      },
+      "relations": {
+        "assignee": {
+          "union": {
+            "child": [
+              { "this": {} },
+              { "computedUserset": { "relation": "ownership" } }
+            ]
+          }
+        },
+        "ownership": { "this": {} }
+      },
+      "type": "role"
+    }
+  ],
+  "conditions": {
+    "has_attribute_access": {
+      "expression": "attribute_name != \"\" \u0026\u0026 allowed_values.size() \u003e 0",
+      "metadata": {
+        "module": "row_filter_policy",
+        "source_info": { "file": "components/row_filter_policy.fga" }
+      },
+      "name": "has_attribute_access",
+      "parameters": {
+        "allowed_values": {
+          "generic_types": [{ "type_name": "TYPE_NAME_STRING" }],
+          "type_name": "TYPE_NAME_LIST"
+        },
+        "attribute_name": { "type_name": "TYPE_NAME_STRING" }
+      }
+    }
+  }
+}

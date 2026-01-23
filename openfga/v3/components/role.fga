@@ -1,0 +1,7 @@
+module lakekeeper-role
+
+type role
+  relations
+    # Relation Hierarchies
+    define assignee: [user, role#assignee] or ownership
+    define ownership: [user, role#assignee]
