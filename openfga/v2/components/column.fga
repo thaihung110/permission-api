@@ -1,7 +1,0 @@
-module column
-type column # module: lakekeeper-column, column-level masking
-  relations
-    define parent: [table]
-    define select: [user, role#assignee] or select from parent
-    # Relation used for explicit masking (mask-by-tuple; default is unmasked)
-    define mask: [user, role#assignee]

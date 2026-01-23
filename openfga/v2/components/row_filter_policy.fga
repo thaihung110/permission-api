@@ -1,4 +1,3 @@
-
 module row_filter_policy
 type row_filter_policy
   relations

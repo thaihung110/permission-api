@@ -1,7 +1,13 @@
 schema: '1.2'
 contents:
+  - components/model_version.fga
   - components/user.fga
-  - components/table.fga
-  - components/column.fga
-  - components/row_filter_policy.fga
   - components/role.fga
+  - components/server.fga
+  - components/project.fga
+  - components/warehouse.fga
+  - components/namespace.fga
+  - components/lakekeeper_table.fga
+  - components/lakekeeper_view.fga
+  - components/row_filter_policy.fga
+  - components/column.fga
