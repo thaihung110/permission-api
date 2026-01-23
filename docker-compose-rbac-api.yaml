@@ -85,7 +85,7 @@ services:
     image: alpine:latest
     container_name: openfga-bootstrap-2
     volumes:
-      - ./openfga_v2/auth_model_v2.json:/model.json:ro
+      - ./openfga/v3/auth_model_v3.json:/model.json:ro
       - ./scripts/bootstrap_curl.sh:/bootstrap.sh:ro
     entrypoint: /bin/sh
     command:
