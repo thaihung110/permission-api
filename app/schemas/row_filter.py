@@ -2,7 +2,7 @@
 Row filter related Pydantic schemas
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -116,11 +116,12 @@ class RowFilterPolicyGrantResponse(BaseModel):
     success: bool
     user_id: str
     policy_id: str = Field(
-        ..., description="Policy identifier (format: table_attribute_filter)"
+        ...,
+        description="Policy identifier (format: catalog.schema.table.attribute_name)",
     )
     object_id: str = Field(
         ...,
-        description="OpenFGA object ID (format: row_filter_policy:table_attribute_filter)",
+        description="OpenFGA object ID (format: row_filter_policy:catalog.schema.table.attribute_name)",
     )
     table_fqn: str = Field(
         ...,
@@ -136,8 +137,8 @@ class RowFilterPolicyGrantResponse(BaseModel):
             "example": {
                 "success": True,
                 "user_id": "sale_nam",
-                "policy_id": "user_region_filter",
-                "object_id": "row_filter_policy:user_region_filter",
+                "policy_id": "lakekeeper_bronze.finance.user.region",
+                "object_id": "row_filter_policy:lakekeeper_bronze.finance.user.region",
                 "table_fqn": "lakekeeper_bronze.finance.user",
                 "attribute_name": "region",
                 "relation": "viewer",
@@ -215,11 +216,123 @@ class RowFilterPolicyListResponse(BaseModel):
                 "table_fqn": "lakekeeper_bronze.finance.user",
                 "policies": [
                     {
-                        "policy_id": "user_region_filter",
+                        "policy_id": "lakekeeper_bronze.finance.user.region",
                         "attribute_name": "region",
                         "allowed_values": ["mien_bac"],
                     }
                 ],
                 "count": 1,
+            }
+        }
+
+
+# Batch Row Filter Schemas (for Trino direct integration)
+
+
+class TableResource(BaseModel):
+    """Table resource specification from Trino"""
+
+    catalogName: str = Field(..., description="Catalog name")
+    schemaName: str = Field(..., description="Schema name")
+    tableName: str = Field(..., description="Table name")
+
+
+class RowFilterResource(BaseModel):
+    """Resource wrapper containing a table"""
+
+    table: TableResource = Field(..., description="Table resource")
+
+
+class RowFilterIdentityContext(BaseModel):
+    """Identity context from Trino request"""
+
+    user: str = Field(..., description="User identifier")
+    groups: List[str] = Field(default_factory=list, description="User groups")
+
+
+class RowFilterContext(BaseModel):
+    """Context from Trino request"""
+
+    identity: RowFilterIdentityContext = Field(
+        ..., description="Identity information"
+    )
+    softwareStack: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Software stack information (e.g., {'trinoVersion': '467'})",
+    )
+
+
+class RowFilterAction(BaseModel):
+    """Action from Trino request"""
+
+    operation: str = Field(
+        ..., description="Operation name (e.g., 'GetRowFilters')"
+    )
+    resource: RowFilterResource = Field(..., description="Resource with table")
+
+
+class BatchRowFilterInput(BaseModel):
+    """Input wrapper for batch row filter request"""
+
+    context: RowFilterContext = Field(..., description="Request context")
+    action: RowFilterAction = Field(..., description="Action with resource")
+
+
+class BatchRowFilterRequest(BaseModel):
+    """Request model for batch row filter check (Trino format)"""
+
+    input: BatchRowFilterInput = Field(..., description="Input data")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "input": {
+                    "context": {
+                        "identity": {
+                            "user": "hung",
+                            "groups": [],
+                        },
+                        "softwareStack": {
+                            "trinoVersion": "467",
+                        },
+                    },
+                    "action": {
+                        "operation": "GetRowFilters",
+                        "resource": {
+                            "table": {
+                                "catalogName": "lakekeeper_bronze",
+                                "schemaName": "finance",
+                                "tableName": "user",
+                            }
+                        },
+                    },
+                }
+            }
+        }
+
+
+class RowFilterExpression(BaseModel):
+    """Row filter expression result"""
+
+    expression: str = Field(..., description="SQL WHERE clause expression")
+
+
+class BatchRowFilterResponse(BaseModel):
+    """Response model for batch row filter check"""
+
+    result: List[RowFilterExpression] = Field(
+        ...,
+        description="Array of filter expressions (typically one expression)",
+        default_factory=list,
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "result": [
+                    {
+                        "expression": "region IN ('north')",
+                    }
+                ]
             }
         }

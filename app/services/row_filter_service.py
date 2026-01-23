@@ -7,6 +7,9 @@ from typing import List, Optional, Tuple
 
 from app.external.openfga_client import OpenFGAManager
 from app.schemas.row_filter import (
+    BatchRowFilterRequest,
+    BatchRowFilterResponse,
+    RowFilterExpression,
     RowFilterPolicyGrant,
     RowFilterPolicyGrantResponse,
     RowFilterPolicyInfo,
@@ -18,23 +21,24 @@ logger = logging.getLogger(__name__)
 
 def parse_column_from_policy_id(policy_id: str) -> Optional[str]:
     """
-    Extract column name from policy ID using naming convention
+    Extract column name from policy ID.
 
-    Format: {table_name}_{column_name}_filter
-    Examples:
-        "customers_region_filter" → "region"
-        "employees_department_filter" → "department"
-
-    Args:
-        policy_id: Policy ID (e.g., "customers_region_filter")
-
-    Returns:
-        Column name or None if cannot parse
+    Supported formats:
+    - New: "{catalog}.{schema}.{table}.{column}"  -> "column"
+    - Old: "{table}_{column}_filter"              -> "column"
     """
-    # Remove "_filter" suffix and get last part
+    if not policy_id:
+        return None
+
+    # New format: fully-qualified column path
+    if "." in policy_id:
+        parts = [p for p in policy_id.split(".") if p]
+        return parts[-1] if len(parts) >= 4 else None
+
+    # Old format (legacy): {table}_{column}_filter
     parts = policy_id.replace("_filter", "").split("_")
     if len(parts) >= 2:
-        return parts[-1]  # Last part is column name
+        return parts[-1]
     return None
 
 
@@ -75,7 +79,7 @@ class RowFilterService:
             table_fqn: Fully qualified table name (e.g., "prod.public.customers")
 
         Returns:
-            List of policy IDs (e.g., ["customers_region_filter"])
+            List of policy IDs (e.g., ["lakekeeper_bronze.finance.user.region"])
         """
         try:
             tuples = await self.openfga.read_tuples(
@@ -297,8 +301,8 @@ class RowFilterService:
         """
         Build row_filter_policy identifier from resource and attribute name
 
-        Policy ID format: {table_name}_{attribute_name}_filter
-        Example: "user_region_filter" for table "user" and attribute "region"
+        Policy ID format (NEW): {catalog}.{schema}.{table}.{attribute_name}
+        Example: "lakekeeper_bronze.finance.user.region"
 
         Args:
             resource: Resource specification (must have catalog, schema, table)
@@ -324,9 +328,13 @@ class RowFilterService:
                 'Example: "region"'
             )
 
-        # Build policy ID: {table_name}_{attribute_name}_filter
+        # Build policy ID (fully-qualified column path).
+        # IMPORTANT: do NOT use "_" as a separator since catalog/schema/table can contain "_"
+        schema_name = resource.schema
         table_name = resource.table
-        policy_id = f"{table_name}_{attribute_name}_filter"
+        policy_id = (
+            f"{resource.catalog}.{schema_name}.{table_name}.{attribute_name}"
+        )
 
         # Build object_id
         object_id = f"row_filter_policy:{policy_id}"
@@ -349,7 +357,7 @@ class RowFilterService:
 
         Args:
             resource: Resource specification
-            policy_object_id: Policy object ID (e.g., "row_filter_policy:user_region_filter")
+            policy_object_id: Policy object ID (e.g., "row_filter_policy:lakekeeper_bronze.finance.user.region")
         """
         try:
             schema_name = resource.schema
@@ -599,3 +607,73 @@ class RowFilterService:
             )
             # Return empty list on error (fail gracefully)
             return []
+
+    async def batch_get_row_filters(
+        self, request: BatchRowFilterRequest
+    ) -> BatchRowFilterResponse:
+        """
+        Batch get row filter expressions for a user on a table (Trino integration).
+
+        This method processes Trino's batch row filter request format and returns
+        the SQL filter expression.
+
+        Args:
+            request: Batch row filter request from Trino
+
+        Returns:
+            Batch row filter response with filter expression
+        """
+        logger.info(
+            f"Batch getting row filters: user={request.input.context.identity.user}, "
+            f"table={request.input.action.resource.table.tableName}"
+        )
+
+        try:
+            # Extract user_id from context
+            user_id = request.input.context.identity.user
+
+            # Validate operation
+            if request.input.action.operation != "GetRowFilters":
+                logger.warning(
+                    f"Unexpected operation: {request.input.action.operation}, "
+                    "expected 'GetRowFilters'"
+                )
+
+            # Extract table information
+            table_resource = request.input.action.resource.table
+            table_fqn = f"{table_resource.catalogName}.{table_resource.schemaName}.{table_resource.tableName}"
+
+            logger.debug(
+                f"Processing row filter request: user={user_id}, table={table_fqn}"
+            )
+
+            # Build row filter SQL using existing method
+            filter_sql = await self.build_row_filter_sql(user_id, table_fqn)
+
+            # Build response
+            result = []
+            if filter_sql:
+                logger.info(
+                    f"Row filter found for user={user_id}, table={table_fqn}: {filter_sql}"
+                )
+                result.append(RowFilterExpression(expression=filter_sql))
+            else:
+                logger.info(
+                    f"No row filter found for user={user_id}, table={table_fqn}"
+                )
+                # Return empty result if no filter (Trino will not apply any filter)
+
+            logger.info(
+                f"Batch row filter check completed: user={user_id}, "
+                f"table={table_fqn}, has_filter={len(result) > 0}"
+            )
+
+            return BatchRowFilterResponse(result=result)
+
+        except Exception as e:
+            logger.error(
+                f"Error in batch row filter check: {e}",
+                exc_info=True,
+            )
+            # Return empty result on error (fail gracefully - no filter applied)
+            return BatchRowFilterResponse(result=[])

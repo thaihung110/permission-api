@@ -82,15 +82,6 @@ def build_resource_identifiers(
         _extract_resource_fields(resource)
     )
 
-    # Normalize operation/relation to relation for consistency
-    # Both "create" and "CreateCatalog", "CreateSchema", "CreateTable" are handled
-    is_create_operation = operation_or_relation in (
-        "create",
-        "CreateCatalog",
-        "CreateSchema",
-        "CreateTable",
-    )
-
     # Special case: CreateCatalog or create relation with no resource
     # For grant: resource can be empty, grant on catalog:system
     # For check: always check on catalog:system (where permission was granted for CreateCatalog)

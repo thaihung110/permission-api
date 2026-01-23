@@ -258,7 +258,7 @@ class OpenFGAManager:
         Args:
             user: User identifier (optional, e.g., "user:alice")
             relation: Relation to filter by (optional, e.g., "viewer")
-            object_id: Object identifier to filter by (optional, e.g., "row_filter_policy:customers_region_filter")
+            object_id: Object identifier to filter by (optional, e.g., "row_filter_policy:lakekeeper_bronze.finance.user.region")
 
         Returns:
             List of tuples with condition context (deserialized from bytea by SDK)
@@ -340,7 +340,7 @@ class OpenFGAManager:
             object_type: Object type (e.g., "row_filter_policy")
 
         Returns:
-            List of object IDs (e.g., ["row_filter_policy:user_region_filter"])
+            List of object IDs (e.g., ["row_filter_policy:lakekeeper_bronze.finance.user.region"])
 
         Example:
             objects = await openfga.list_objects(
@@ -348,7 +348,7 @@ class OpenFGAManager:
                 relation="applies_to",
                 object_type="row_filter_policy"
             )
-            # Returns: ["row_filter_policy:user_region_filter"]
+            # Returns: ["row_filter_policy:lakekeeper_bronze.finance.user.region"]
         """
         if not self.client:
             raise RuntimeError("OpenFGA client not initialized")

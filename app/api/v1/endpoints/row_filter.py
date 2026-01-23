@@ -2,17 +2,26 @@
 Row filter endpoints
 """
 
+import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
 from app.schemas.row_filter import (
+    BatchRowFilterInput,
+    BatchRowFilterRequest,
+    BatchRowFilterResponse,
+    RowFilterAction,
+    RowFilterContext,
+    RowFilterIdentityContext,
     RowFilterPolicyGrant,
     RowFilterPolicyGrantResponse,
     RowFilterPolicyListRequest,
     RowFilterPolicyListResponse,
     RowFilterRequest,
+    RowFilterResource,
     RowFilterResponse,
+    TableResource,
 )
 from app.services.row_filter_service import RowFilterService
 
@@ -20,83 +29,140 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/query", response_model=RowFilterResponse)
+@router.post("/query", response_model=BatchRowFilterResponse)
 async def get_row_filter(
-    request_data: RowFilterRequest,
     request: Request,
 ):
     """
-    Get row filter SQL expression for user on table
+    Get row filter SQL expression for user on table (Trino integration).
 
-    This endpoint is called by OPA to get row filters for Trino queries.
+    This endpoint accepts both old format and OPA format, auto-converts to OPA format,
+    and returns the SQL filter expression.
 
-    Example:
-        POST /row-filter/query
+    Supports 2 formats:
+
+    1. Old format (auto-converted):
         {
-          "user_id": "sale_nam",
-          "resource": {
-            "catalog_name": "prod",
-            "schema_name": "public",
-            "table_name": "customers"
-          }
+            "user_id": "hung",
+            "resource": {
+                "catalog_name": "lakekeeper_bronze",
+                "schema_name": "finance",
+                "table_name": "user"
+            }
+        }
+
+    2. OPA format:
+        {
+            "input": {
+            "context": {
+                "identity": {"user": "hung", "groups": []},
+                "softwareStack": {"trinoVersion": "467"}
+            },
+            "action": {
+                "operation": "GetRowFilters",
+                "resource": {
+                "table": {
+                    "catalogName": "lakekeeper_bronze",
+                    "schemaName": "finance",
+                    "tableName": "user"
+                }
+                }
+            }
+            }
         }
 
     Response:
         {
-          "filter_expression": "region IN ('mien_bac')",
-          "has_filter": true
+            "result": [
+                {"expression": "region IN ('north')"}
+            ]
         }
     """
-    logger.info(
-        f"[ENDPOINT] Received row filter request: "
-        f"user={request_data.user_id}, resource={request_data.resource}"
-    )
-
     try:
-        # Build table FQN
-        resource = request_data.resource
-        catalog_name = resource.get("catalog_name")
-        schema_name = resource.get("schema_name")
-        table_name = resource.get("table_name")
-
-        if not all([catalog_name, schema_name, table_name]):
-            logger.warning(
-                f"Invalid resource specification: {resource}. "
-                "Missing catalog_name, schema_name, or table_name"
-            )
-            # Fail closed - deny all
-            return RowFilterResponse(filter_expression="1=0", has_filter=True)
-
-        table_fqn = f"{catalog_name}.{schema_name}.{table_name}"
-
-        # Get OpenFGA manager from app state
-        openfga = request.app.state.openfga
-        service = RowFilterService(openfga)
-
-        # Build row filter SQL
-        filter_sql = await service.build_row_filter_sql(
-            request_data.user_id, table_fqn
-        )
-
-        has_filter = filter_sql is not None
+        # Read raw request body
+        body_bytes = await request.body()
+        body_str = body_bytes.decode("utf-8") if body_bytes else "{}"
+        body_dict = json.loads(body_str) if body_str else {}
 
         logger.info(
-            f"[ENDPOINT] Returning row filter: "
-            f"user={request_data.user_id}, table={table_fqn}, "
-            f"filter={filter_sql}, has_filter={has_filter}"
+            f"[ENDPOINT] Received row filter request:\n"
+            f"request_body=\n{json.dumps(body_dict, indent=2)}"
         )
 
-        return RowFilterResponse(
-            filter_expression=filter_sql, has_filter=has_filter
+        # Auto-detect format and convert to OPA format
+        if "input" in body_dict:
+            # Already OPA format
+            logger.info("[ENDPOINT] Detected OPA format")
+            batch_request = BatchRowFilterRequest(**body_dict)
+        else:
+            # Old format - convert to OPA format
+            logger.info(
+                "[ENDPOINT] Detected old format, converting to OPA format"
+            )
+            user_id = body_dict.get("user_id", "")
+            resource = body_dict.get("resource", {})
+            catalog_name = resource.get("catalog_name", "")
+            schema_name = resource.get("schema_name", "")
+            table_name = resource.get("table_name", "")
+
+            if not all([user_id, catalog_name, schema_name, table_name]):
+                logger.error(
+                    f"[ENDPOINT] Invalid request: missing required fields"
+                )
+                return BatchRowFilterResponse(result=[])
+
+            # Convert to OPA format
+            batch_request = BatchRowFilterRequest(
+                input=BatchRowFilterInput(
+                    context=RowFilterContext(
+                        identity=RowFilterIdentityContext(
+                            user=user_id,
+                            groups=[],
+                        ),
+                        softwareStack={},
+                    ),
+                    action=RowFilterAction(
+                        operation="GetRowFilters",
+                        resource=RowFilterResource(
+                            table=TableResource(
+                                catalogName=catalog_name,
+                                schemaName=schema_name,
+                                tableName=table_name,
+                            )
+                        ),
+                    ),
+                )
+            )
+
+        # Extract info for logging
+        user_id = batch_request.input.context.identity.user
+        table_name = batch_request.input.action.resource.table.tableName
+
+        logger.info(
+            f"[ENDPOINT] Processing row filter: user={user_id}, table={table_name}"
         )
 
+        openfga = request.app.state.openfga
+        service = RowFilterService(openfga)
+        result = await service.batch_get_row_filters(batch_request)
+
+        # Log response
+        response_body = result.model_dump_json(indent=2)
+        logger.info(
+            f"[ENDPOINT] Row filter completed:\n"
+            f"user={user_id}, table={table_name}, "
+            f"has_filter={len(result.result) > 0}\n"
+            f"response_body=\n{response_body}"
+        )
+
+        return result
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing JSON: {e}", exc_info=True)
+        return BatchRowFilterResponse(result=[])
     except Exception as e:
-        logger.error(
-            f"Error getting row filter: {e}",
-            exc_info=True,
-        )
-        # Fail closed - deny all on error
-        return RowFilterResponse(filter_expression="1=0", has_filter=True)
+        logger.error(f"Error in row filter check: {e}", exc_info=True)
+        return BatchRowFilterResponse(result=[])
 
 
 @router.post("/grant", response_model=RowFilterPolicyGrantResponse)
@@ -127,8 +193,8 @@ async def grant_row_filter_policy(
         {
           "success": true,
           "user_id": "sale_nam",
-          "policy_id": "user_region_filter",
-          "object_id": "row_filter_policy:user_region_filter",
+          "policy_id": "lakekeeper_bronze.finance.user.region",
+          "object_id": "row_filter_policy:lakekeeper_bronze.finance.user.region",
           "table_fqn": "lakekeeper_bronze.finance.user",
           "attribute_name": "region",
           "relation": "viewer"
@@ -190,8 +256,8 @@ async def revoke_row_filter_policy(
         {
           "success": true,
           "user_id": "sale_nam",
-          "policy_id": "user_region_filter",
-          "object_id": "row_filter_policy:user_region_filter",
+          "policy_id": "lakekeeper_bronze.finance.user.region",
+          "object_id": "row_filter_policy:lakekeeper_bronze.finance.user.region",
           "table_fqn": "lakekeeper_bronze.finance.user",
           "attribute_name": "region",
           "relation": "viewer"
@@ -253,7 +319,7 @@ async def list_row_filter_policies(
           "table_fqn": "lakekeeper_bronze.finance.user",
           "policies": [
             {
-              "policy_id": "user_region_filter",
+              "policy_id": "lakekeeper_bronze.finance.user.region",
               "attribute_name": "region",
               "allowed_values": ["mien_bac"]
             }

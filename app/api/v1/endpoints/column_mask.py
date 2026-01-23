@@ -277,37 +277,27 @@ async def batch_check_column_masks(
         }
     """
     try:
+        # Log full request body
+        request_body = request_data.model_dump_json(indent=2)
         logger.info(
-            f"[ENDPOINT] Received batch column mask request: "
+            f"[ENDPOINT] Received batch column mask request:\n"
             f"user={request_data.input.context.identity.user}, "
-            f"columns={len(request_data.input.action.filterResources)}"
+            f"columns={len(request_data.input.action.filterResources)}\n"
+            f"request_body=\n{request_body}"
         )
 
         openfga = request.app.state.openfga
         service = ColumnMaskService(openfga)
         result = await service.batch_check_column_masks(request_data)
 
-        # Log response details for tracking
-        if result.result:
-            result_details = [
-                {
-                    "index": entry.index,
-                    "expression": entry.viewExpression.expression,
-                }
-                for entry in result.result
-            ]
-            logger.info(
-                f"[ENDPOINT] Batch column mask check completed: "
-                f"user={request_data.input.context.identity.user}, "
-                f"masked_columns={len(result.result)}, "
-                f"result={result_details}"
-            )
-        else:
-            logger.info(
-                f"[ENDPOINT] Batch column mask check completed: "
-                f"user={request_data.input.context.identity.user}, "
-                f"masked_columns=0, result=[]"
-            )
+        # Log full response body
+        response_body = result.model_dump_json(indent=2)
+        logger.info(
+            f"[ENDPOINT] Batch column mask check completed:\n"
+            f"user={request_data.input.context.identity.user}, "
+            f"masked_columns={len(result.result)}\n"
+            f"response_body=\n{response_body}"
+        )
 
         return result
 
