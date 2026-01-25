@@ -2,62 +2,35 @@
 Application constants
 """
 
-# Operation to relation mapping for OpenFGA
-OPERATION_TO_RELATION_MAP = {
-    # Catalog operations (Trino catalogs)
-    "AccessCatalog": "select",
-    "ShowCatalogs": "describe",
-    "CreateCatalog": "create",
-    "DropCatalog": "modify",
-    "FilterCatalogs": "describe",
-    # Namespace operations
-    "ShowSchemas": "describe",
-    "CreateSchema": "create",
-    "DropSchema": "modify",
-    "RenameSchema": "modify",
-    "SetSchemaAuthorization": "manage_grants",
-    "FilterSchemas": "describe",
-    "CreateTable": "create",
-    "CreateView": "create",
-    # Table operations - DDL
-    "ShowTables": "describe",
-    "DropTable": "modify",
-    "RenameTable": "modify",
-    "SetTableComment": "describe",
-    "SetTableAuthorization": "manage_grants",
-    "FilterTables": "describe",
-    # Table operations - DML (data)
-    "SelectFromColumns": "select",
-    "InsertIntoTable": "modify",
-    "UpdateTableColumns": "modify",
-    "DeleteFromTable": "modify",
-    "TruncateTable": "modify",
-    # Column operations
-    "ShowColumns": "describe",
-    "FilterColumns": "describe",
-    "AddColumn": "modify",
-    "DropColumn": "modify",
-    "RenameColumn": "modify",
-    "SetColumnComment": "describe",
-    # Column masking
-    "MaskColumn": "mask",
-    # View operations
-    "DropView": "modify",
-    "RenameView": "modify",
-    "SetViewComment": "describe",
-    "RefreshMaterializedView": "modify",
-    # System operations
-    "ExecuteQuery": "describe",
-}
-
-# OpenFGA object type prefixes
+# =============================================================================
+# API Object Type Prefixes
+# These are used in the API layer (request/response) and service logic
+# =============================================================================
 OBJECT_TYPE_CATALOG = "catalog"
-OBJECT_TYPE_SCHEMA = "schema"  # Changed from namespace to schema in OpenFGA v2
+OBJECT_TYPE_SCHEMA = "schema"
 OBJECT_TYPE_TABLE = "table"
 OBJECT_TYPE_COLUMN = "column"
+OBJECT_TYPE_ROLE = "role"
+
+# =============================================================================
+# OpenFGA v3 Object Type Prefixes
+# These are the actual types used in OpenFGA v3 model
+# Mapping: catalog -> warehouse, schema -> namespace, table -> lakekeeper_table
+# =============================================================================
+FGA_TYPE_WAREHOUSE = "warehouse"
+FGA_TYPE_NAMESPACE = "namespace"
+FGA_TYPE_LAKEKEEPER_TABLE = "lakekeeper_table"
+FGA_TYPE_COLUMN = "column"
+
+# =============================================================================
+# Other Constants
+# =============================================================================
 
 # OpenFGA user type prefix
 USER_TYPE_PREFIX = "user"
 
 # Special catalog for system-level permissions
 SYSTEM_CATALOG = "system"
+
+# Special row filter policy type
+FGA_TYPE_ROW_FILTER_POLICY = "row_filter_policy"

@@ -15,8 +15,14 @@ from app.schemas.column_mask import (
     ViewExpression,
 )
 from app.schemas.permission import ResourceSpec
-from app.utils.operation_mapper import build_user_identifier
-from app.utils.resource_builder import build_resource_identifiers
+from app.utils.operation_mapper import (
+    build_user_identifier,
+    build_user_identifier_with_type,
+)
+from app.utils.resource_builder import (
+    build_fga_resource_identifiers,
+    build_resource_identifiers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +68,8 @@ class ColumnMaskService:
 
         # Build column object_id using resource_builder
         # Use "mask" as the relation to ensure correct column-level identifier
-        result = build_resource_identifiers(
+        # Note: Column type is unchanged in FGA v3, but we use build_fga_resource_identifiers for consistency
+        result = build_fga_resource_identifiers(
             grant.resource, "mask", raise_on_error=True
         )
 
@@ -81,8 +88,10 @@ class ColumnMaskService:
                 "Column mask requires column-level resource."
             )
 
-        # Build user identifier
-        user = build_user_identifier(grant.user_id)
+        # Build user identifier based on user_type
+        user = build_user_identifier_with_type(
+            grant.user_id, grant.user_type.value
+        )
 
         # Grant mask permission in OpenFGA
         await self.openfga.grant_permission(user, "mask", object_id)
@@ -127,7 +136,8 @@ class ColumnMaskService:
             )
 
         # Build column object_id using resource_builder
-        result = build_resource_identifiers(
+        # Note: Column type is unchanged in FGA v3, but we use build_fga_resource_identifiers for consistency
+        result = build_fga_resource_identifiers(
             grant.resource, "mask", raise_on_error=True
         )
 
@@ -146,8 +156,10 @@ class ColumnMaskService:
                 "Column mask requires column-level resource."
             )
 
-        # Build user identifier
-        user = build_user_identifier(grant.user_id)
+        # Build user identifier based on user_type
+        user = build_user_identifier_with_type(
+            grant.user_id, grant.user_type.value
+        )
 
         # Revoke mask permission in OpenFGA
         await self.openfga.revoke_permission(user, "mask", object_id)
@@ -281,8 +293,8 @@ class ColumnMaskService:
                         column=column.columnName,
                     )
 
-                    # Build column object_id using resource_builder
-                    result = build_resource_identifiers(
+                    # Build column object_id using resource_builder (FGA v3 format)
+                    result = build_fga_resource_identifiers(
                         resource_spec, "mask", raise_on_error=False
                     )
 

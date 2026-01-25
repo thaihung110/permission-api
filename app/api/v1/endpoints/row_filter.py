@@ -78,26 +78,40 @@ async def get_row_filter(
             ]
         }
     """
+    # Read raw request body
     try:
-        # Read raw request body
         body_bytes = await request.body()
         body_str = body_bytes.decode("utf-8") if body_bytes else "{}"
         body_dict = json.loads(body_str) if body_str else {}
-
-        logger.info(
-            f"[ENDPOINT] Received row filter request:\n"
-            f"request_body=\n{json.dumps(body_dict, indent=2)}"
+    except Exception as e:
+        logger.error(
+            f"\n{'='*60}\n"
+            f"[ROW-FILTER] ERROR - Failed to read/parse request\n"
+            f"{'='*60}\n"
+            f"Error: {e}\n"
+            f"{'='*60}"
         )
+        return BatchRowFilterResponse(result=[])
 
+    # Pretty log the request
+    logger.info(
+        f"\n{'='*60}\n"
+        f"[ROW-FILTER] REQUEST\n"
+        f"{'='*60}\n"
+        f"{json.dumps(body_dict, indent=2)}\n"
+        f"{'='*60}"
+    )
+
+    try:
         # Auto-detect format and convert to OPA format
         if "input" in body_dict:
             # Already OPA format
-            logger.info("[ENDPOINT] Detected OPA format")
+            logger.debug("[ROW-FILTER] Detected OPA format")
             batch_request = BatchRowFilterRequest(**body_dict)
         else:
             # Old format - convert to OPA format
-            logger.info(
-                "[ENDPOINT] Detected old format, converting to OPA format"
+            logger.debug(
+                "[ROW-FILTER] Detected old format, converting to OPA format"
             )
             user_id = body_dict.get("user_id", "")
             resource = body_dict.get("resource", {})
@@ -107,7 +121,7 @@ async def get_row_filter(
 
             if not all([user_id, catalog_name, schema_name, table_name]):
                 logger.error(
-                    f"[ENDPOINT] Invalid request: missing required fields"
+                    "[ROW-FILTER] Invalid request: missing required fields"
                 )
                 return BatchRowFilterResponse(result=[])
 
@@ -136,32 +150,55 @@ async def get_row_filter(
 
         # Extract info for logging
         user_id = batch_request.input.context.identity.user
-        table_name = batch_request.input.action.resource.table.tableName
-
-        logger.info(
-            f"[ENDPOINT] Processing row filter: user={user_id}, table={table_name}"
-        )
+        table_resource = batch_request.input.action.resource.table
+        table_fqn = f"{table_resource.catalogName}.{table_resource.schemaName}.{table_resource.tableName}"
 
         openfga = request.app.state.openfga
         service = RowFilterService(openfga)
         result = await service.batch_get_row_filters(batch_request)
 
-        # Log response
-        response_body = result.model_dump_json(indent=2)
+        # Pretty log the response
+        response_dict = result.model_dump(mode="json")
+        filter_details = []
+        for item in result.result:
+            filter_details.append(f"  -> {item.expression}")
+
         logger.info(
-            f"[ENDPOINT] Row filter completed:\n"
-            f"user={user_id}, table={table_name}, "
-            f"has_filter={len(result.result) > 0}\n"
-            f"response_body=\n{response_body}"
+            f"\n{'='*60}\n"
+            f"[ROW-FILTER] RESPONSE\n"
+            f"{'='*60}\n"
+            f"User: {user_id}\n"
+            f"Table: {table_fqn}\n"
+            f"Has filter: {len(result.result) > 0}\n"
+            + (
+                "\n".join(filter_details) + "\n"
+                if filter_details
+                else "  (no filters)\n"
+            )
+            + f"Full Response:\n{json.dumps(response_dict, indent=2)}\n"
+            f"{'='*60}"
         )
 
         return result
 
     except json.JSONDecodeError as e:
-        logger.error(f"Error parsing JSON: {e}", exc_info=True)
+        logger.error(
+            f"\n{'='*60}\n"
+            f"[ROW-FILTER] ERROR - JSON decode failed\n"
+            f"{'='*60}\n"
+            f"Error: {e}\n"
+            f"{'='*60}"
+        )
         return BatchRowFilterResponse(result=[])
     except Exception as e:
-        logger.error(f"Error in row filter check: {e}", exc_info=True)
+        logger.error(
+            f"\n{'='*60}\n"
+            f"[ROW-FILTER] ERROR\n"
+            f"{'='*60}\n"
+            f"Error: {e}\n"
+            f"{'='*60}",
+            exc_info=True,
+        )
         return BatchRowFilterResponse(result=[])
 
 

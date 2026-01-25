@@ -2,9 +2,17 @@
 Permission-related Pydantic schemas
 """
 
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
+
+
+class UserType(str, Enum):
+    """User type for OpenFGA tuple user field"""
+
+    USER = "user"
+    USERSET = "userset"
 
 
 class ResourceSpec(BaseModel):
@@ -19,6 +27,10 @@ class ResourceSpec(BaseModel):
     table: Optional[str] = Field(None, description="Table name (e.g., 'user')")
     column: Optional[str] = Field(
         None, description="Column name (e.g., 'email')"
+    )
+    role: Optional[str] = Field(
+        None,
+        description="Role name for role-based operations (e.g., 'DE', 'Sales')",
     )
 
 
@@ -87,7 +99,23 @@ class ConditionSpec(BaseModel):
 class PermissionGrant(BaseModel):
     """Request model for granting permission"""
 
-    user_id: str = Field(..., description="User identifier from Trino")
+    user_id: str = Field(
+        ...,
+        description=(
+            "User identifier. Format depends on user_type:\n"
+            "- user_type='user': 'user:<id>' (e.g., 'user:alice') or 'schema:<catalog.schema>' "
+            "(auto-mapped to warehouse/namespace)\n"
+            "- user_type='userset': 'role:<role_name>#<relation>' (e.g., 'role:DE#assignee')"
+        ),
+    )
+    user_type: UserType = Field(
+        default=UserType.USER,
+        description=(
+            "Type of user identifier:\n"
+            "- 'user': Regular user or schema resource\n"
+            "- 'userset': Role-based userset (format: role:<role_name>#<relation>)"
+        ),
+    )
     resource: ResourceSpec = Field(
         ...,
         description="Resource specification with catalog, schema, table",
@@ -104,9 +132,10 @@ class PermissionGrant(BaseModel):
         json_schema_extra = {
             "examples": [
                 {
-                    "description": "Catalog-level permission (standalone)",
+                    "description": "Catalog-level permission for a regular user",
                     "value": {
                         "user_id": "admin",
+                        "user_type": "user",
                         "resource": {
                             "catalog": "lakekeeper",
                         },
@@ -114,9 +143,35 @@ class PermissionGrant(BaseModel):
                     },
                 },
                 {
-                    "description": "Table-level permission",
+                    "description": "Table-level permission for a regular user",
                     "value": {
                         "user_id": "admin",
+                        "user_type": "user",
+                        "resource": {
+                            "catalog": "lakekeeper",
+                            "schema": "finance",
+                            "table": "user",
+                        },
+                        "relation": "select",
+                    },
+                },
+                {
+                    "description": "Grant permission to a role userset",
+                    "value": {
+                        "user_id": "role:DE#assignee",
+                        "user_type": "userset",
+                        "resource": {
+                            "catalog": "lakekeeper",
+                            "schema": "finance",
+                        },
+                        "relation": "select",
+                    },
+                },
+                {
+                    "description": "Grant permission to schema resource (auto-mapped to namespace)",
+                    "value": {
+                        "user_id": "schema:lakekeeper.finance",
+                        "user_type": "user",
                         "resource": {
                             "catalog": "lakekeeper",
                             "schema": "finance",
@@ -129,6 +184,7 @@ class PermissionGrant(BaseModel):
                     "description": "Row filter policy with condition context",
                     "value": {
                         "user_id": "sale_nam",
+                        "user_type": "user",
                         "resource": {},
                         "relation": "viewer",
                         "condition": {
@@ -138,6 +194,17 @@ class PermissionGrant(BaseModel):
                                 "allowed_values": ["mien_bac"],
                             },
                         },
+                    },
+                },
+                {
+                    "description": "Assign user to a role (grant assignee relation on role)",
+                    "value": {
+                        "user_id": "alice",
+                        "user_type": "user",
+                        "resource": {
+                            "role": "DE",
+                        },
+                        "relation": "assignee",
                     },
                 },
             ]
@@ -158,7 +225,23 @@ class PermissionGrantResponse(BaseModel):
 class PermissionRevoke(BaseModel):
     """Request model for revoking permission"""
 
-    user_id: str = Field(..., description="User identifier from Trino")
+    user_id: str = Field(
+        ...,
+        description=(
+            "User identifier. Format depends on user_type:\n"
+            "- user_type='user': 'user:<id>' (e.g., 'user:alice') or 'schema:<catalog.schema>' "
+            "(auto-mapped to warehouse/namespace)\n"
+            "- user_type='userset': 'role:<role_name>#<relation>' (e.g., 'role:DE#assignee')"
+        ),
+    )
+    user_type: UserType = Field(
+        default=UserType.USER,
+        description=(
+            "Type of user identifier:\n"
+            "- 'user': Regular user or schema resource\n"
+            "- 'userset': Role-based userset (format: role:<role_name>#<relation>)"
+        ),
+    )
     resource: ResourceSpec = Field(
         ...,
         description="Resource specification with catalog, schema, table",
@@ -176,9 +259,10 @@ class PermissionRevoke(BaseModel):
         json_schema_extra = {
             "examples": [
                 {
-                    "description": "Catalog-level permission (standalone)",
+                    "description": "Catalog-level permission for a regular user",
                     "value": {
                         "user_id": "admin",
+                        "user_type": "user",
                         "resource": {
                             "catalog": "lakekeeper",
                         },
@@ -186,9 +270,10 @@ class PermissionRevoke(BaseModel):
                     },
                 },
                 {
-                    "description": "Table-level permission",
+                    "description": "Table-level permission for a regular user",
                     "value": {
                         "user_id": "admin",
+                        "user_type": "user",
                         "resource": {
                             "catalog": "lakekeeper",
                             "schema": "finance",
@@ -198,9 +283,22 @@ class PermissionRevoke(BaseModel):
                     },
                 },
                 {
+                    "description": "Revoke permission from a role userset",
+                    "value": {
+                        "user_id": "role:DE#assignee",
+                        "user_type": "userset",
+                        "resource": {
+                            "catalog": "lakekeeper",
+                            "schema": "finance",
+                        },
+                        "relation": "select",
+                    },
+                },
+                {
                     "description": "Row filter policy revocation",
                     "value": {
                         "user_id": "hung",
+                        "user_type": "user",
                         "resource": {
                             "catalog": "lakekeeper_bronze",
                             "schema": "finance",

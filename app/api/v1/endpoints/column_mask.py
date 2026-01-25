@@ -276,32 +276,62 @@ async def batch_check_column_masks(
           ]
         }
     """
-    try:
-        # Log full request body
-        request_body = request_data.model_dump_json(indent=2)
-        logger.info(
-            f"[ENDPOINT] Received batch column mask request:\n"
-            f"user={request_data.input.context.identity.user}, "
-            f"columns={len(request_data.input.action.filterResources)}\n"
-            f"request_body=\n{request_body}"
-        )
+    import json
 
+    user_id = request_data.input.context.identity.user
+    columns_count = len(request_data.input.action.filterResources)
+
+    # Pretty log the request
+    request_dict = request_data.model_dump(mode="json", exclude_none=True)
+    logger.info(
+        f"\n{'='*60}\n"
+        f"[COLUMN-MASK] REQUEST\n"
+        f"{'='*60}\n"
+        f"User: {user_id}\n"
+        f"Columns count: {columns_count}\n"
+        f"Full Request:\n{json.dumps(request_dict, indent=2)}\n"
+        f"{'='*60}"
+    )
+
+    try:
         openfga = request.app.state.openfga
         service = ColumnMaskService(openfga)
         result = await service.batch_check_column_masks(request_data)
 
-        # Log full response body
-        response_body = result.model_dump_json(indent=2)
+        # Pretty log the response
+        response_dict = result.model_dump(mode="json")
+        masked_details = []
+        for item in result.result:
+            masked_details.append(
+                f"  [{item.index}] -> {item.viewExpression.expression}"
+            )
+
         logger.info(
-            f"[ENDPOINT] Batch column mask check completed:\n"
-            f"user={request_data.input.context.identity.user}, "
-            f"masked_columns={len(result.result)}\n"
-            f"response_body=\n{response_body}"
+            f"\n{'='*60}\n"
+            f"[COLUMN-MASK] RESPONSE\n"
+            f"{'='*60}\n"
+            f"User: {user_id}\n"
+            f"Masked columns: {len(result.result)}/{columns_count}\n"
+            + (
+                "\n".join(masked_details) + "\n"
+                if masked_details
+                else "  (no columns masked)\n"
+            )
+            + f"Full Response:\n{json.dumps(response_dict, indent=2)}\n"
+            f"{'='*60}"
         )
 
         return result
 
     except Exception as e:
-        logger.error(f"Error in batch column mask check: {e}", exc_info=True)
+        logger.error(
+            f"\n{'='*60}\n"
+            f"[COLUMN-MASK] ERROR\n"
+            f"{'='*60}\n"
+            f"User: {user_id}\n"
+            f"Error: {e}\n"
+            f"{'='*60}",
+            exc_info=True,
+        )
         # Return empty result on error (fail gracefully)
         return BatchColumnMaskResponse(result=[])

@@ -1643,7 +1643,12 @@
           },
           "viewer": {
             "directly_related_user_types": [
-              { "condition": "has_attribute_access", "type": "user" }
+              { "condition": "has_attribute_access", "type": "user" },
+              {
+                "condition": "has_attribute_access",
+                "relation": "assignee",
+                "type": "role"
+              }
             ]
           }
         },

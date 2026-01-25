@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.schemas.permission import ResourceSpec
+from app.schemas.permission import ResourceSpec, UserType
 
 
 class RowFilterRequest(BaseModel):
@@ -53,7 +53,22 @@ class RowFilterResponse(BaseModel):
 class RowFilterPolicyGrant(BaseModel):
     """Request model for granting row filter policy"""
 
-    user_id: str = Field(..., description="User identifier from Trino")
+    user_id: str = Field(
+        ...,
+        description=(
+            "User identifier. Format depends on user_type:\n"
+            "- user_type='user': 'user:<id>' or 'schema:<catalog.schema>'\n"
+            "- user_type='userset': 'role:<role_name>#<relation>'"
+        ),
+    )
+    user_type: UserType = Field(
+        default=UserType.USER,
+        description=(
+            "Type of user identifier:\n"
+            "- 'user': Regular user or schema resource\n"
+            "- 'userset': Role-based userset (format: role:<role_name>#<relation>)"
+        ),
+    )
     resource: ResourceSpec = Field(
         ...,
         description="Resource specification with catalog, schema, table (table is required)",
@@ -97,16 +112,36 @@ class RowFilterPolicyGrant(BaseModel):
 
     class Config:
         json_schema_extra = {
-            "example": {
-                "user_id": "sale_nam",
-                "resource": {
-                    "catalog": "lakekeeper_bronze",
-                    "schema": "finance",
-                    "table": "user",
+            "examples": [
+                {
+                    "description": "Row filter policy for a regular user",
+                    "value": {
+                        "user_id": "sale_nam",
+                        "user_type": "user",
+                        "resource": {
+                            "catalog": "lakekeeper_bronze",
+                            "schema": "finance",
+                            "table": "user",
+                        },
+                        "attribute_name": "region",
+                        "allowed_values": ["mien_bac"],
+                    },
                 },
-                "attribute_name": "region",
-                "allowed_values": ["mien_bac"],
-            }
+                {
+                    "description": "Row filter policy for a role userset",
+                    "value": {
+                        "user_id": "role:Sales#assignee",
+                        "user_type": "userset",
+                        "resource": {
+                            "catalog": "lakekeeper_bronze",
+                            "schema": "finance",
+                            "table": "user",
+                        },
+                        "attribute_name": "region",
+                        "allowed_values": ["mien_bac", "mien_trung"],
+                    },
+                },
+            ]
         }
 
 

@@ -1,5 +1,9 @@
 """
 Utility functions for building OpenFGA resource identifiers
+
+This module builds resource identifiers in API format (catalog/schema/table).
+For OpenFGA v3 communication, use build_fga_resource_identifiers() which
+automatically converts to FGA format (warehouse/namespace/lakekeeper_table).
 """
 
 from typing import Optional, Tuple, Union
@@ -7,15 +11,19 @@ from typing import Optional, Tuple, Union
 from app.core.constants import (
     OBJECT_TYPE_CATALOG,
     OBJECT_TYPE_COLUMN,
+    OBJECT_TYPE_ROLE,
     OBJECT_TYPE_SCHEMA,
     OBJECT_TYPE_TABLE,
     SYSTEM_CATALOG,
 )
+from app.utils.type_mapper import convert_resource_identifiers_to_fga
 
 
 def _extract_resource_fields(
     resource: Union[dict, object],
-) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+) -> Tuple[
+    Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]
+]:
     """
     Extract resource fields handling both dict and object types.
 
@@ -23,7 +31,7 @@ def _extract_resource_fields(
         resource: Resource as dict or Pydantic model
 
     Returns:
-        Tuple of (catalog_name, schema_name, table_name, column_name)
+        Tuple of (catalog_name, schema_name, table_name, column_name, role_name)
     """
     # Handle dict type
     if isinstance(resource, dict):
@@ -31,14 +39,16 @@ def _extract_resource_fields(
         schema_name = resource.get("schema_name") or resource.get("schema")
         table_name = resource.get("table_name") or resource.get("table")
         column_name = resource.get("column_name") or resource.get("column")
+        role_name = resource.get("role_name") or resource.get("role")
     else:
         # Handle object type (Pydantic model)
         catalog_name = getattr(resource, "catalog", None)
         schema_name = getattr(resource, "schema", None)
         table_name = getattr(resource, "table", None)
         column_name = getattr(resource, "column", None)
+        role_name = getattr(resource, "role", None)
 
-    return catalog_name, schema_name, table_name, column_name
+    return catalog_name, schema_name, table_name, column_name, role_name
 
 
 def build_resource_identifiers(
@@ -78,9 +88,17 @@ def build_resource_identifiers(
     Raises:
         ValueError: If raise_on_error=True and resource specification is invalid
     """
-    catalog_name, schema_name, table_name, column_name = (
+    catalog_name, schema_name, table_name, column_name, role_name = (
         _extract_resource_fields(resource)
     )
+
+    # Role-level permissions: if role is specified, use role:<role_name>
+    # This takes priority over other resource types
+    if role_name:
+        object_id = f"{OBJECT_TYPE_ROLE}:{role_name}"
+        resource_type = OBJECT_TYPE_ROLE
+        resource_id = role_name
+        return object_id, resource_type, resource_id
 
     # Special case: CreateCatalog or create relation with no resource
     # For grant: resource can be empty, grant on catalog:system
@@ -216,3 +234,44 @@ def build_object_id_from_resource(
     if result:
         return result[0]  # Return only object_id
     return None
+
+
+def build_fga_resource_identifiers(
+    resource: Union[dict, object],
+    operation_or_relation: str,
+    raise_on_error: bool = False,
+) -> Optional[Tuple[str, str, str]]:
+    """
+    Build OpenFGA v3 resource identifiers for FGA communication.
+
+    This is a wrapper around build_resource_identifiers() that automatically
+    converts the result to OpenFGA v3 format:
+    - catalog -> warehouse
+    - schema -> namespace
+    - table -> lakekeeper_table
+    - column -> column (unchanged)
+
+    Use this function when you need to write/read tuples from OpenFGA.
+
+    Args:
+        resource: Resource specification (dict or Pydantic model)
+        operation_or_relation: Operation name or relation
+        raise_on_error: If True, raise ValueError on invalid resource
+
+    Returns:
+        Tuple of (fga_object_id, fga_resource_type, resource_id) or None
+
+    Example:
+        # API format: ("catalog:lakekeeper", "catalog", "lakekeeper")
+        # FGA format: ("warehouse:lakekeeper", "warehouse", "lakekeeper")
+    """
+    result = build_resource_identifiers(
+        resource, operation_or_relation, raise_on_error
+    )
+    if result is None:
+        return None
+
+    api_object_id, api_resource_type, resource_id = result
+    return convert_resource_identifiers_to_fga(
+        api_object_id, api_resource_type, resource_id
+    )

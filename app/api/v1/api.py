@@ -4,7 +4,13 @@ API Router - Combines all v1 endpoints
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import column_mask, health, permissions, row_filter
+from app.api.v1.endpoints import (
+    column_mask,
+    health,
+    permissions,
+    row_filter,
+    trino_opa,
+)
 
 api_router = APIRouter()
 
@@ -25,3 +31,8 @@ api_router.include_router(
 api_router.include_router(
     column_mask.router, prefix="/column-mask", tags=["Column Masks"]
 )
+
+# Include Trino OPA compatible endpoints at root level
+# These endpoints mimic OPA's API format for Trino access control
+# Full path: /api/v1/allow and /api/v1/batch
+api_router.include_router(trino_opa.router, tags=["Trino OPA Compatible"])
