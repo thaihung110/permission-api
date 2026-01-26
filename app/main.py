@@ -80,6 +80,33 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+@app.middleware("http")
+async def log_raw_body(request: Request, call_next):
+    """Log raw request body for every incoming API request."""
+    if request.method in ("POST", "PUT", "PATCH"):
+        body = await request.body()
+        try:
+            raw_str = body.decode("utf-8", errors="replace")
+            logger.info(
+                "[REQUEST] %s %s | raw_body=%s",
+                request.method,
+                request.url.path,
+                raw_str if raw_str else "(empty)",
+            )
+        except Exception as e:
+            logger.warning("[REQUEST] Failed to log body: %s", e)
+
+        # Make body consumable again for route handlers
+        async def receive():
+            return {"type": "http.request", "body": body}
+
+        request = Request(request.scope, receive)
+    else:
+        logger.info("[REQUEST] %s %s | (no body)", request.method, request.url.path)
+    response = await call_next(request)
+    return response
+
+
 # Include API router with v1 prefix
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 
