@@ -32,6 +32,9 @@ class ResourceSpec(BaseModel):
         None,
         description="Role name for role-based operations (e.g., 'DE', 'Sales')",
     )
+    project: Optional[str] = Field(
+        None, description="Project name (e.g., 'lakekeeper')"
+    )
 
 
 class PermissionCheckRequest(BaseModel):

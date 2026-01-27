@@ -24,11 +24,13 @@ from app.utils.resource_builder import (
     build_resource_identifiers,
 )
 from app.utils.type_mapper import (
+    FGA_SYSTEM_PROJECT,
     FGA_TYPE_LAKEKEEPER_TABLE,
     FGA_TYPE_NAMESPACE,
     FGA_TYPE_WAREHOUSE,
     api_object_id_to_fga,
     build_fga_catalog_object_id,
+    build_fga_project_object_id,
     build_fga_schema_object_id,
     build_fga_table_object_id,
 )
@@ -111,6 +113,19 @@ class PermissionService:
 
             # 3. Build user identifier
             user = build_user_identifier(request_data.user_id)
+
+            # Special case: CreateCatalog
+            # Check 'create' permission on the Project (parent of catalog)
+            # As per deployment rules, there is only one project: FGA_SYSTEM_PROJECT
+            if request_data.operation == "CreateCatalog":
+                # Check 'create' permission on the Project (parent of catalog)
+                # As per deployment rules, there is only one project: FGA_SYSTEM_PROJECT
+                fga_object_id = build_fga_project_object_id(FGA_SYSTEM_PROJECT)
+
+                logger.info(
+                    f"CreateCatalog check: redirecting to project level "
+                    f"(checking {relation} on {fga_object_id})"
+                )
 
             # Special case: Always allow read operations on information_schema
             # information_schema is a metadata schema that should be accessible to users

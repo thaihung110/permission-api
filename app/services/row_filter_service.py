@@ -3,7 +3,7 @@ Row filter service - Build SQL filters from OpenFGA row filter policies
 """
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 from app.external.openfga_client import OpenFGAManager
 from app.schemas.row_filter import (
@@ -46,18 +46,20 @@ def parse_column_from_policy_id(policy_id: str) -> Optional[str]:
     return None
 
 
-def escape_sql_value(value: str) -> str:
+def escape_sql_value(value: Union[str, int, float]) -> str:
     """
-    Escape SQL value to prevent injection
+    Escape SQL value to prevent injection.
+    Accepts strings and numbers (int, float); numbers are converted to string.
 
     Args:
-        value: Raw value
+        value: Raw value (string or number)
 
     Returns:
-        Escaped value
+        Escaped value as string
     """
+    s = str(value)
     # Remove dangerous characters
-    sanitized = value.replace("'", "''").replace(";", "").replace("--", "")
+    sanitized = s.replace("'", "''").replace(";", "").replace("--", "")
     sanitized = sanitized.replace("\\", "").replace("\n", "").replace("\r", "")
     # Limit length
     return sanitized[:100]
@@ -508,12 +510,12 @@ class RowFilterService:
             grant.user_id, grant.user_type.value
         )
 
-        # Build condition dict
+        # Build condition dict (OpenFGA expects list<string>; normalize to str)
         condition_dict = {
             "name": "has_attribute_access",
             "context": {
                 "attribute_name": grant.attribute_name,
-                "allowed_values": grant.allowed_values,
+                "allowed_values": [str(v) for v in grant.allowed_values],
             },
         }
 

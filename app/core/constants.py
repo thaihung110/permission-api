@@ -11,6 +11,7 @@ OBJECT_TYPE_SCHEMA = "schema"
 OBJECT_TYPE_TABLE = "table"
 OBJECT_TYPE_COLUMN = "column"
 OBJECT_TYPE_ROLE = "role"
+OBJECT_TYPE_PROJECT = "project"
 
 # =============================================================================
 # OpenFGA v3 Object Type Prefixes

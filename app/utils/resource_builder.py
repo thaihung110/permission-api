@@ -11,6 +11,7 @@ from typing import Optional, Tuple, Union
 from app.core.constants import (
     OBJECT_TYPE_CATALOG,
     OBJECT_TYPE_COLUMN,
+    OBJECT_TYPE_PROJECT,
     OBJECT_TYPE_ROLE,
     OBJECT_TYPE_SCHEMA,
     OBJECT_TYPE_TABLE,
@@ -22,7 +23,12 @@ from app.utils.type_mapper import convert_resource_identifiers_to_fga
 def _extract_resource_fields(
     resource: Union[dict, object],
 ) -> Tuple[
-    Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]
+    Optional[str],
+    Optional[str],
+    Optional[str],
+    Optional[str],
+    Optional[str],
+    Optional[str],
 ]:
     """
     Extract resource fields handling both dict and object types.
@@ -31,7 +37,7 @@ def _extract_resource_fields(
         resource: Resource as dict or Pydantic model
 
     Returns:
-        Tuple of (catalog_name, schema_name, table_name, column_name, role_name)
+        Tuple of (catalog_name, schema_name, table_name, column_name, role_name, project_name)
     """
     # Handle dict type
     if isinstance(resource, dict):
@@ -40,6 +46,7 @@ def _extract_resource_fields(
         table_name = resource.get("table_name") or resource.get("table")
         column_name = resource.get("column_name") or resource.get("column")
         role_name = resource.get("role_name") or resource.get("role")
+        project_name = resource.get("project_name") or resource.get("project")
     else:
         # Handle object type (Pydantic model)
         catalog_name = getattr(resource, "catalog", None)
@@ -47,8 +54,16 @@ def _extract_resource_fields(
         table_name = getattr(resource, "table", None)
         column_name = getattr(resource, "column", None)
         role_name = getattr(resource, "role", None)
+        project_name = getattr(resource, "project", None)
 
-    return catalog_name, schema_name, table_name, column_name, role_name
+    return (
+        catalog_name,
+        schema_name,
+        table_name,
+        column_name,
+        role_name,
+        project_name,
+    )
 
 
 def build_resource_identifiers(
@@ -88,9 +103,21 @@ def build_resource_identifiers(
     Raises:
         ValueError: If raise_on_error=True and resource specification is invalid
     """
-    catalog_name, schema_name, table_name, column_name, role_name = (
-        _extract_resource_fields(resource)
-    )
+    (
+        catalog_name,
+        schema_name,
+        table_name,
+        column_name,
+        role_name,
+        project_name,
+    ) = _extract_resource_fields(resource)
+
+    # Project-level permissions
+    if project_name:
+        object_id = f"{OBJECT_TYPE_PROJECT}:{project_name}"
+        resource_type = OBJECT_TYPE_PROJECT
+        resource_id = project_name
+        return object_id, resource_type, resource_id
 
     # Role-level permissions: if role is specified, use role:<role_name>
     # This takes priority over other resource types

@@ -31,9 +31,11 @@ API_TYPE_CATALOG = "catalog"
 API_TYPE_SCHEMA = "schema"
 API_TYPE_TABLE = "table"
 API_TYPE_COLUMN = "column"
+API_TYPE_PROJECT = "project"
 
 # OpenFGA v3 types (used in OpenFGA tuples)
 FGA_TYPE_WAREHOUSE = "warehouse"
+FGA_TYPE_PROJECT = "project"  # Added project type
 FGA_TYPE_NAMESPACE = "namespace"
 FGA_TYPE_LAKEKEEPER_TABLE = "lakekeeper_table"
 FGA_TYPE_COLUMN = "column"
@@ -41,6 +43,9 @@ FGA_TYPE_COLUMN = "column"
 # Special constants
 SYSTEM_CATALOG = "system"
 FGA_SYSTEM_WAREHOUSE = "system"
+FGA_SYSTEM_PROJECT = (
+    "00000000-0000-0000-0000-000000000000"  # Default project ID
+)
 
 # =============================================================================
 # Mapping Dictionaries
@@ -52,6 +57,7 @@ API_TO_FGA_TYPE_MAP = {
     API_TYPE_SCHEMA: FGA_TYPE_NAMESPACE,
     API_TYPE_TABLE: FGA_TYPE_LAKEKEEPER_TABLE,
     API_TYPE_COLUMN: FGA_TYPE_COLUMN,
+    API_TYPE_PROJECT: FGA_TYPE_PROJECT,
 }
 
 # OpenFGA type -> API type mapping (reverse)
@@ -60,6 +66,7 @@ FGA_TO_API_TYPE_MAP = {
     FGA_TYPE_NAMESPACE: API_TYPE_SCHEMA,
     FGA_TYPE_LAKEKEEPER_TABLE: API_TYPE_TABLE,
     FGA_TYPE_COLUMN: API_TYPE_COLUMN,
+    FGA_TYPE_PROJECT: API_TYPE_PROJECT,
 }
 
 
@@ -107,6 +114,7 @@ def api_object_id_to_fga(api_object_id: str) -> str:
     - "catalog:my_catalog" -> "warehouse:my_catalog"
     - "schema:my_catalog.my_schema" -> "namespace:my_catalog.my_schema"
     - "table:my_catalog.my_schema.my_table" -> "lakekeeper_table:my_catalog.my_schema.my_table"
+    - "project:my_project" -> "project:my_project" (unchanged)
     - "column:..." -> "column:..." (unchanged)
 
     Args:
@@ -131,6 +139,7 @@ def fga_object_id_to_api(fga_object_id: str) -> str:
     - "warehouse:my_catalog" -> "catalog:my_catalog"
     - "namespace:my_catalog.my_schema" -> "schema:my_catalog.my_schema"
     - "lakekeeper_table:my_catalog.my_schema.my_table" -> "table:my_catalog.my_schema.my_table"
+    - "project:my_project" -> "project:my_project" (unchanged)
     - "column:..." -> "column:..." (unchanged)
 
     Args:
@@ -223,6 +232,19 @@ def build_fga_catalog_object_id(catalog_name: str) -> str:
         OpenFGA object_id (e.g., "warehouse:lakekeeper")
     """
     return f"{FGA_TYPE_WAREHOUSE}:{catalog_name}"
+
+
+def build_fga_project_object_id(project_name: str) -> str:
+    """
+    Build OpenFGA v3 project object_id from project name.
+
+    Args:
+        project_name: Project name (e.g., "lakekeeper")
+
+    Returns:
+        OpenFGA object_id (e.g., "project:lakekeeper")
+    """
+    return f"{FGA_TYPE_PROJECT}:{project_name}"
 
 
 def build_fga_schema_object_id(catalog_name: str, schema_name: str) -> str:

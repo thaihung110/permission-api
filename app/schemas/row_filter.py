@@ -2,7 +2,7 @@
 Row filter related Pydantic schemas
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -76,9 +76,9 @@ class RowFilterPolicyGrant(BaseModel):
     attribute_name: str = Field(
         ..., description="Attribute name (e.g., 'region', 'department')"
     )
-    allowed_values: List[str] = Field(
+    allowed_values: List[Union[str, int, float]] = Field(
         ...,
-        description="List of allowed values (e.g., ['mien_bac', 'mien_trung'])",
+        description="List of allowed values; accepts strings and numbers (e.g. ['mien_bac', 1, 2.5])",
     )
 
     @model_validator(mode="after")
@@ -228,7 +228,9 @@ class RowFilterPolicyInfo(BaseModel):
 
     policy_id: str = Field(..., description="Policy identifier")
     attribute_name: str = Field(..., description="Attribute name")
-    allowed_values: List[str] = Field(..., description="List of allowed values")
+    allowed_values: List[Union[str, int, float]] = Field(
+        ..., description="List of allowed values (strings or numbers)"
+    )
 
 
 class RowFilterPolicyListResponse(BaseModel):
