@@ -16,9 +16,24 @@ from app.schemas.permission import (
 )
 from app.utils.operation_mapper import (
     build_user_identifier,
+    build_user_identifier_with_type,
     map_operation_to_relation,
 )
-from app.utils.resource_builder import build_resource_identifiers
+from app.utils.resource_builder import (
+    build_fga_resource_identifiers,
+    build_resource_identifiers,
+)
+from app.utils.type_mapper import (
+    FGA_SYSTEM_PROJECT,
+    FGA_TYPE_LAKEKEEPER_TABLE,
+    FGA_TYPE_NAMESPACE,
+    FGA_TYPE_WAREHOUSE,
+    api_object_id_to_fga,
+    build_fga_catalog_object_id,
+    build_fga_project_object_id,
+    build_fga_schema_object_id,
+    build_fga_table_object_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +83,9 @@ class PermissionService:
                 )
                 return PermissionCheckResponse(allowed=False)
 
-            # 2. Build OpenFGA object ID directly from request (no DB resolution)
-            result = build_resource_identifiers(
+            # 2. Build OpenFGA v3 object ID directly from request (no DB resolution)
+            # This returns FGA format: warehouse/namespace/lakekeeper_table
+            result = build_fga_resource_identifiers(
                 request_data.resource,
                 request_data.operation,
                 raise_on_error=False,
@@ -91,11 +107,46 @@ class PermissionService:
                     )
                 return PermissionCheckResponse(allowed=False)
 
-            # Extract identifiers from result tuple
-            object_id, resource_type, resource_id = result
+            # Extract identifiers from result tuple (now in FGA format)
+            # object_id: warehouse:xxx, namespace:xxx.yyy, lakekeeper_table:xxx.yyy.zzz
+            fga_object_id, fga_resource_type, resource_id = result
 
             # 3. Build user identifier
             user = build_user_identifier(request_data.user_id)
+
+            # Special case: CreateCatalog
+            # Check 'create' permission on the Project (parent of catalog)
+            # As per deployment rules, there is only one project: FGA_SYSTEM_PROJECT
+            if request_data.operation == "CreateCatalog":
+                # Check 'create' permission on the Project (parent of catalog)
+                # As per deployment rules, there is only one project: FGA_SYSTEM_PROJECT
+                fga_object_id = build_fga_project_object_id(FGA_SYSTEM_PROJECT)
+
+                logger.info(
+                    f"CreateCatalog check: redirecting to project level "
+                    f"(checking {relation} on {fga_object_id})"
+                )
+
+            # Special case: Always allow read operations on information_schema
+            # information_schema is a metadata schema that should be accessible to users
+            # who have access to the catalog
+            resource_dict = request_data.resource
+            schema_name = resource_dict.get("schema", "")
+            if schema_name == "information_schema":
+                # Allow read operations: select, describe, show operations
+                read_operations = {
+                    "SelectFromColumns",
+                    "ShowTables",
+                    "ShowColumns",
+                    "ShowSchemas",
+                    "GetColumnMask",
+                }
+                if request_data.operation in read_operations:
+                    logger.info(
+                        f"Allowing {request_data.operation} on information_schema "
+                        f"(metadata schema is always accessible)"
+                    )
+                    return PermissionCheckResponse(allowed=True)
 
             # 4. Hierarchical permission checking
             # Check permission in order: catalog -> schema -> table
@@ -104,14 +155,14 @@ class PermissionService:
             # Column-level permissions are inherited from table in FGA model
             # EXCEPT for 'mask' relation which is column-specific
             # So we redirect column checks to table level for all other relations
-            if resource_type == "column" and relation != "mask":
+            if fga_resource_type == "column" and relation != "mask":
                 logger.info(
                     f"Column-level {relation} check: redirecting to table level "
                     f"(column {relation} inherits from table in FGA model)"
                 )
                 # Extract table object_id from column resource
                 # column format: column:catalog.schema.table.column
-                # we need: table:catalog.schema.table
+                # we need: lakekeeper_table:catalog.schema.table
                 parts = resource_id.split(".")
                 if len(parts) >= 4:
                     catalog_name, schema_name, table_name = (
@@ -119,10 +170,10 @@ class PermissionService:
                         parts[1],
                         parts[2],
                     )
-                    object_id = (
-                        f"table:{catalog_name}.{schema_name}.{table_name}"
+                    fga_object_id = build_fga_table_object_id(
+                        catalog_name, schema_name, table_name
                     )
-                    resource_type = "table"
+                    fga_resource_type = FGA_TYPE_LAKEKEEPER_TABLE
                     resource_id = f"{catalog_name}.{schema_name}.{table_name}"
                 else:
                     logger.warning(
@@ -130,140 +181,323 @@ class PermissionService:
                     )
                     return PermissionCheckResponse(allowed=False)
 
-            # Check at the target resource level first
+            # Check at the target resource level first (using FGA object_id)
             allowed = await self.openfga.check_permission(
-                user, relation, object_id
+                user, relation, fga_object_id
             )
 
             if allowed:
                 logger.info(
-                    f"Permission check: ALLOWED at {resource_type} level for user={request_data.user_id}"
+                    f"Permission check: ALLOWED at {fga_resource_type} level for user={request_data.user_id}"
                 )
                 return PermissionCheckResponse(allowed=True)
 
-            # Special case: AccessCatalog operation
-            # If user doesn't have explicit permission on catalog object,
-            # check if they have ANY permission on ANY resource within this catalog
-            # (e.g., permissions on schemas or tables in this catalog)
+            # Special case: AccessCatalog and ShowSchemas operations on catalog level
+            # If user doesn't have explicit 'select' permission on catalog object,
+            # check if they have ANY OTHER permission on the catalog
+            # or ANY permission on ANY resource within this catalog
+            # ShowSchemas with catalog resource = "can user see schemas in this catalog?"
             if (
-                request_data.operation == "AccessCatalog"
-                and resource_type == "catalog"
+                request_data.operation in ("AccessCatalog", "ShowSchemas")
+                and fga_resource_type == FGA_TYPE_WAREHOUSE
             ):
                 catalog_name = resource_id
+
+                # First, check if user has ANY permission on the warehouse itself
+                # (not just 'select' which was checked above)
+                for warehouse_relation in ["describe", "modify", "create"]:
+                    try:
+                        has_perm = await self.openfga.check_permission(
+                            user, warehouse_relation, fga_object_id
+                        )
+                        if has_perm:
+                            logger.info(
+                                f"{request_data.operation}: ALLOWED - user has {warehouse_relation} "
+                                f"on warehouse {catalog_name}"
+                            )
+                            return PermissionCheckResponse(allowed=True)
+                    except Exception as e:
+                        logger.debug(
+                            f"Error checking {warehouse_relation} on warehouse: {e}"
+                        )
+
                 logger.info(
-                    f"AccessCatalog denied at catalog level, checking for any permissions "
+                    f"{request_data.operation} denied at catalog level, checking for any permissions "
                     f"within catalog {catalog_name}"
                 )
 
                 # Check if user has permissions on any schema or table in this catalog
-                # We'll check for common relations: select, describe, modify, create
+                # Relations differ by object type:
+                # - namespace: select, describe, modify, create
+                # - lakekeeper_table: select, describe, modify (no create)
                 try:
+                    # Check namespaces with all relations
                     for check_relation in [
                         "select",
                         "describe",
                         "modify",
                         "create",
                     ]:
-                        # Check schemas in this catalog
                         try:
-                            schema_objects = await self.openfga.list_objects(
+                            namespace_objects = await self.openfga.list_objects(
                                 user=user,
                                 relation=check_relation,
-                                object_type="schema",
+                                object_type=FGA_TYPE_NAMESPACE,
                             )
-                            # Check if any schema belongs to this catalog
-                            for schema_obj in schema_objects:
-                                # schema format: schema:catalog.schema
-                                if schema_obj.startswith(
-                                    f"schema:{catalog_name}."
+                            # Check if any namespace belongs to this warehouse
+                            for namespace_obj in namespace_objects:
+                                # namespace format: namespace:catalog.schema
+                                if namespace_obj.startswith(
+                                    f"{FGA_TYPE_NAMESPACE}:{catalog_name}."
                                 ):
                                     logger.info(
-                                        f"AccessCatalog: ALLOWED - user has {check_relation} "
-                                        f"on {schema_obj} in catalog {catalog_name}"
+                                        f"{request_data.operation}: ALLOWED - user has {check_relation} "
+                                        f"on {namespace_obj} in warehouse {catalog_name}"
                                     )
                                     return PermissionCheckResponse(allowed=True)
                         except Exception as e:
                             logger.debug(
-                                f"No {check_relation} permission found on schemas: {e}"
+                                f"No {check_relation} permission found on namespaces: {e}"
                             )
 
-                        # Check tables in this catalog
+                    # Check lakekeeper_tables with only valid relations (no 'create')
+                    for check_relation in [
+                        "select",
+                        "describe",
+                        "modify",
+                    ]:
                         try:
                             table_objects = await self.openfga.list_objects(
                                 user=user,
                                 relation=check_relation,
-                                object_type="table",
+                                object_type=FGA_TYPE_LAKEKEEPER_TABLE,
                             )
-                            # Check if any table belongs to this catalog
+                            # Check if any lakekeeper_table belongs to this warehouse
                             for table_obj in table_objects:
-                                # table format: table:catalog.schema.table
+                                # lakekeeper_table format: lakekeeper_table:catalog.schema.table
                                 if table_obj.startswith(
-                                    f"table:{catalog_name}."
+                                    f"{FGA_TYPE_LAKEKEEPER_TABLE}:{catalog_name}."
                                 ):
                                     logger.info(
-                                        f"AccessCatalog: ALLOWED - user has {check_relation} "
-                                        f"on {table_obj} in catalog {catalog_name}"
+                                        f"{request_data.operation}: ALLOWED - user has {check_relation} "
+                                        f"on {table_obj} in warehouse {catalog_name}"
                                     )
                                     return PermissionCheckResponse(allowed=True)
                         except Exception as e:
                             logger.debug(
-                                f"No {check_relation} permission found on tables: {e}"
+                                f"No {check_relation} permission found on lakekeeper_tables: {e}"
                             )
 
                     logger.info(
-                        f"AccessCatalog: DENIED - no permissions found in catalog {catalog_name}"
+                        f"{request_data.operation}: DENIED - no permissions found in warehouse {catalog_name}"
                     )
                 except Exception as e:
                     logger.warning(
                         f"Error checking catalog-level permissions: {e}, denying"
                     )
 
+            # Special case: ShowTables operation (used by FilterTables)
+            # If user has permission on ANY table within this schema, they should see tables
+            # This allows users who have table-level permissions to see those tables in SHOW TABLES
+            if (
+                request_data.operation == "ShowTables"
+                and fga_resource_type == FGA_TYPE_NAMESPACE
+            ):
+                parts = resource_id.split(".")
+                if len(parts) >= 2:
+                    catalog_name, schema_name = parts[0], parts[1]
+                    schema_fqn = f"{catalog_name}.{schema_name}"
+
+                    logger.info(
+                        f"ShowTables denied at namespace level, checking for any permissions "
+                        f"on tables within schema {schema_fqn}"
+                    )
+
+                    # First check if user has any permission on the namespace itself
+                    for ns_relation in [
+                        "select",
+                        "describe",
+                        "modify",
+                        "create",
+                    ]:
+                        try:
+                            has_perm = await self.openfga.check_permission(
+                                user, ns_relation, fga_object_id
+                            )
+                            if has_perm:
+                                logger.info(
+                                    f"ShowTables: ALLOWED - user has {ns_relation} "
+                                    f"on namespace {schema_fqn}"
+                                )
+                                return PermissionCheckResponse(allowed=True)
+                        except Exception as e:
+                            logger.debug(
+                                f"Error checking {ns_relation} on namespace: {e}"
+                            )
+
+                    # Check if user has permissions on any table in this schema
+                    for check_relation in ["select", "describe", "modify"]:
+                        try:
+                            table_objects = await self.openfga.list_objects(
+                                user=user,
+                                relation=check_relation,
+                                object_type=FGA_TYPE_LAKEKEEPER_TABLE,
+                            )
+                            # Check if any table belongs to this schema
+                            for table_obj in table_objects:
+                                # lakekeeper_table format: lakekeeper_table:catalog.schema.table
+                                if table_obj.startswith(
+                                    f"{FGA_TYPE_LAKEKEEPER_TABLE}:{schema_fqn}."
+                                ):
+                                    logger.info(
+                                        f"ShowTables: ALLOWED - user has {check_relation} "
+                                        f"on {table_obj} in schema {schema_fqn}"
+                                    )
+                                    return PermissionCheckResponse(allowed=True)
+                        except Exception as e:
+                            logger.debug(
+                                f"No {check_relation} permission found on tables in schema: {e}"
+                            )
+
+                    logger.info(
+                        f"ShowTables: DENIED - no permissions found on tables in schema {schema_fqn}"
+                    )
+
+            # Special case: ShowSchemas operation (used by FilterSchemas)
+            # If user has permission on ANY table within this schema, they should see the schema
+            # This is similar to AccessCatalog logic but at schema level
+            if (
+                request_data.operation == "ShowSchemas"
+                and fga_resource_type == FGA_TYPE_NAMESPACE
+            ):
+                parts = resource_id.split(".")
+                if len(parts) >= 2:
+                    catalog_name, schema_name = parts[0], parts[1]
+                    schema_fqn = f"{catalog_name}.{schema_name}"
+
+                    logger.info(
+                        f"ShowSchemas denied at namespace level, checking for any permissions "
+                        f"on tables within schema {schema_fqn}"
+                    )
+
+                    # First check if user has any permission on the namespace itself
+                    for ns_relation in [
+                        "select",
+                        "describe",
+                        "modify",
+                        "create",
+                    ]:
+                        try:
+                            has_perm = await self.openfga.check_permission(
+                                user, ns_relation, fga_object_id
+                            )
+                            if has_perm:
+                                logger.info(
+                                    f"ShowSchemas: ALLOWED - user has {ns_relation} "
+                                    f"on namespace {schema_fqn}"
+                                )
+                                return PermissionCheckResponse(allowed=True)
+                        except Exception as e:
+                            logger.debug(
+                                f"Error checking {ns_relation} on namespace: {e}"
+                            )
+
+                    # Check if user has permissions on any table in this schema
+                    for check_relation in ["select", "describe", "modify"]:
+                        try:
+                            table_objects = await self.openfga.list_objects(
+                                user=user,
+                                relation=check_relation,
+                                object_type=FGA_TYPE_LAKEKEEPER_TABLE,
+                            )
+                            # Check if any table belongs to this schema
+                            for table_obj in table_objects:
+                                # lakekeeper_table format: lakekeeper_table:catalog.schema.table
+                                if table_obj.startswith(
+                                    f"{FGA_TYPE_LAKEKEEPER_TABLE}:{schema_fqn}."
+                                ):
+                                    logger.info(
+                                        f"ShowSchemas: ALLOWED - user has {check_relation} "
+                                        f"on {table_obj} in namespace {schema_fqn}"
+                                    )
+                                    return PermissionCheckResponse(allowed=True)
+                        except Exception as e:
+                            logger.debug(
+                                f"No {check_relation} permission found on tables in schema: {e}"
+                            )
+
+                    logger.info(
+                        f"ShowSchemas: DENIED - no permissions found in namespace {schema_fqn}"
+                    )
+
             # If not allowed at target level, check hierarchically at parent levels
-            # Table -> check schema -> check catalog
-            if resource_type == "table":
+            # lakekeeper_table -> check namespace -> check warehouse
+            # BUT: Skip hierarchical check for Filter operations (FilterTables, FilterSchemas, etc.)
+            # For filtering, we only show resources the user has DIRECT permission on
+            # This prevents showing all tables just because user has permission on schema
+            filter_operations = {
+                "ShowTables",  # Used by FilterTables
+                "ShowColumns",  # Used by FilterColumns
+                "ShowSchemas",  # Used by FilterSchemas - should check at catalog level only
+            }
+
+            # For filter operations, don't do hierarchical check - rely on OpenFGA model's inheritance
+            if request_data.operation in filter_operations:
+                logger.info(
+                    f"Permission check: DENIED at all levels for user={request_data.user_id} "
+                    f"(filter operation - no hierarchical inheritance)"
+                )
+                # Don't return here - let it fall through to final denied
+            elif fga_resource_type == FGA_TYPE_LAKEKEEPER_TABLE:
                 parts = resource_id.split(".")
                 if len(parts) >= 3:
                     catalog_name, schema_name = parts[0], parts[1]
 
-                    # Check schema level
-                    schema_object_id = f"schema:{catalog_name}.{schema_name}"
+                    # Check namespace level (FGA v3 format)
+                    namespace_object_id = build_fga_schema_object_id(
+                        catalog_name, schema_name
+                    )
                     allowed = await self.openfga.check_permission(
-                        user, relation, schema_object_id
+                        user, relation, namespace_object_id
                     )
 
                     if allowed:
                         logger.info(
-                            f"Permission check: ALLOWED at schema level (hierarchical) for user={request_data.user_id}"
+                            f"Permission check: ALLOWED at namespace level (hierarchical) for user={request_data.user_id}"
                         )
                         return PermissionCheckResponse(allowed=True)
 
-                    # Check catalog level
-                    catalog_object_id = f"catalog:{catalog_name}"
+                    # Check warehouse level (FGA v3 format)
+                    warehouse_object_id = build_fga_catalog_object_id(
+                        catalog_name
+                    )
                     allowed = await self.openfga.check_permission(
-                        user, relation, catalog_object_id
+                        user, relation, warehouse_object_id
                     )
 
                     if allowed:
                         logger.info(
-                            f"Permission check: ALLOWED at catalog level (hierarchical) for user={request_data.user_id}"
+                            f"Permission check: ALLOWED at warehouse level (hierarchical) for user={request_data.user_id}"
                         )
                         return PermissionCheckResponse(allowed=True)
 
-            # Schema -> check catalog
-            elif resource_type == "schema":
+            # Namespace -> check warehouse
+            elif fga_resource_type == FGA_TYPE_NAMESPACE:
                 parts = resource_id.split(".")
                 if len(parts) >= 2:
                     catalog_name = parts[0]
 
-                    # Check catalog level
-                    catalog_object_id = f"catalog:{catalog_name}"
+                    # Check warehouse level (FGA v3 format)
+                    warehouse_object_id = build_fga_catalog_object_id(
+                        catalog_name
+                    )
                     allowed = await self.openfga.check_permission(
-                        user, relation, catalog_object_id
+                        user, relation, warehouse_object_id
                     )
 
                     if allowed:
                         logger.info(
-                            f"Permission check: ALLOWED at catalog level (hierarchical) for user={request_data.user_id}"
+                            f"Permission check: ALLOWED at warehouse level (hierarchical) for user={request_data.user_id}"
                         )
                         return PermissionCheckResponse(allowed=True)
 
@@ -300,14 +534,18 @@ class PermissionService:
 
         resource = grant.resource
 
-        # Build normal resource identifier
-        # Note: Row filter policies should use /row-filter/grant endpoint instead
-        object_id, resource_type, resource_id = (
+        # Build API resource identifiers (for response)
+        api_object_id, api_resource_type, resource_id = (
             self._build_resource_identifiers(resource, grant.relation)
         )
 
-        # Build user identifier
-        user = build_user_identifier(grant.user_id)
+        # Convert to FGA format for OpenFGA communication
+        fga_object_id = api_object_id_to_fga(api_object_id)
+
+        # Build user identifier based on user_type
+        user = build_user_identifier_with_type(
+            grant.user_id, grant.user_type.value
+        )
 
         # Prepare condition dict if provided
         condition_dict = None
@@ -318,30 +556,31 @@ class PermissionService:
             }
             logger.info(
                 f"Granting permission with condition: user={user}, relation={grant.relation}, "
-                f"object={object_id}, condition={grant.condition.name}"
+                f"object={fga_object_id}, condition={grant.condition.name}"
             )
 
-        # Grant permission in OpenFGA
+        # Grant permission in OpenFGA (using FGA object_id)
         await self.openfga.grant_permission(
-            user, grant.relation, object_id, condition=condition_dict
+            user, grant.relation, fga_object_id, condition=condition_dict
         )
 
         if grant.condition:
             logger.info(
                 f"Permission granted with condition: user={user}, relation={grant.relation}, "
-                f"object={object_id}, condition={grant.condition.name}"
+                f"object={fga_object_id}, condition={grant.condition.name}"
             )
         else:
             logger.info(
-                f"Permission granted: user={user}, relation={grant.relation}, object={object_id}"
+                f"Permission granted: user={user}, relation={grant.relation}, object={fga_object_id}"
             )
 
+        # Return API types for backward compatibility
         return PermissionGrantResponse(
             success=True,
             user_id=grant.user_id,
-            resource_type=resource_type,
+            resource_type=api_resource_type,
             resource_id=resource_id,
-            object_id=object_id,
+            object_id=api_object_id,  # Return API format for user-friendly response
             relation=grant.relation,
         )
 
@@ -367,25 +606,32 @@ class PermissionService:
 
         resource = revoke.resource
 
-        # Build normal resource identifier
-        # Note: Row filter policies should use /row-filter/revoke endpoint instead
-        object_id, resource_type, resource_id = (
+        # Build API resource identifiers (for response)
+        api_object_id, api_resource_type, resource_id = (
             self._build_resource_identifiers(resource, revoke.relation)
         )
 
-        # Build user identifier
-        user = build_user_identifier(revoke.user_id)
+        # Convert to FGA format for OpenFGA communication
+        fga_object_id = api_object_id_to_fga(api_object_id)
 
-        # Revoke permission in OpenFGA
-        await self.openfga.revoke_permission(user, revoke.relation, object_id)
-        logger.info(f"Permission revoked: user={user}, object={object_id}")
+        # Build user identifier based on user_type
+        user = build_user_identifier_with_type(
+            revoke.user_id, revoke.user_type.value
+        )
 
+        # Revoke permission in OpenFGA (using FGA object_id)
+        await self.openfga.revoke_permission(
+            user, revoke.relation, fga_object_id
+        )
+        logger.info(f"Permission revoked: user={user}, object={fga_object_id}")
+
+        # Return API types for backward compatibility
         return PermissionRevokeResponse(
             success=True,
             user_id=revoke.user_id,
-            resource_type=resource_type,
+            resource_type=api_resource_type,
             resource_id=resource_id,
-            object_id=object_id,
+            object_id=api_object_id,  # Return API format for user-friendly response
             relation=revoke.relation,
         )
 

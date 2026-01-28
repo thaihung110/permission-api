@@ -6,13 +6,28 @@ from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.schemas.permission import ResourceSpec
+from app.schemas.permission import ResourceSpec, UserType
 
 
 class ColumnMaskGrant(BaseModel):
     """Request model for granting column mask permission"""
 
-    user_id: str = Field(..., description="User identifier from Trino")
+    user_id: str = Field(
+        ...,
+        description=(
+            "User identifier. Format depends on user_type:\n"
+            "- user_type='user': 'user:<id>' or 'schema:<catalog.schema>'\n"
+            "- user_type='userset': 'role:<role_name>#<relation>'"
+        ),
+    )
+    user_type: UserType = Field(
+        default=UserType.USER,
+        description=(
+            "Type of user identifier:\n"
+            "- 'user': Regular user or schema resource\n"
+            "- 'userset': Role-based userset (format: role:<role_name>#<relation>)"
+        ),
+    )
     resource: ResourceSpec = Field(
         ...,
         description="Resource specification with catalog, schema, table, and column (column is required)",
@@ -39,15 +54,34 @@ class ColumnMaskGrant(BaseModel):
 
     class Config:
         json_schema_extra = {
-            "example": {
-                "user_id": "analyst",
-                "resource": {
-                    "catalog": "lakekeeper_bronze",
-                    "schema": "finance",
-                    "table": "user",
-                    "column": "email",
+            "examples": [
+                {
+                    "description": "Column mask for a regular user",
+                    "value": {
+                        "user_id": "analyst",
+                        "user_type": "user",
+                        "resource": {
+                            "catalog": "lakekeeper_bronze",
+                            "schema": "finance",
+                            "table": "user",
+                            "column": "email",
+                        },
+                    },
                 },
-            }
+                {
+                    "description": "Column mask for a role userset",
+                    "value": {
+                        "user_id": "role:DE#assignee",
+                        "user_type": "userset",
+                        "resource": {
+                            "catalog": "lakekeeper_bronze",
+                            "schema": "finance",
+                            "table": "user",
+                            "column": "email",
+                        },
+                    },
+                },
+            ]
         }
 
 

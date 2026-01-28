@@ -19,7 +19,7 @@ services:
       # Expose Postgres for debugging/inspection (optional)
       - "5433:5432"
     networks:
-      - lakehouse-network
+      - iceberg_net
 
   openfga-migrate-2:
     image: openfga/openfga:v1.8.0
@@ -32,7 +32,7 @@ services:
       openfga-db-2:
         condition: service_healthy
     networks:
-      - lakehouse-network
+      - iceberg_net
 
   openfga-2:
     image: openfga/openfga:v1.8.0
@@ -60,7 +60,7 @@ services:
       openfga-migrate-2:
         condition: service_completed_successfully
     networks:
-      - lakehouse-network
+      - iceberg_net
 
   permission-api:
     build:
@@ -78,7 +78,7 @@ services:
       openfga-2:
         condition: service_healthy
     networks:
-      - lakehouse-network
+      - iceberg_net
     restart: no
 
   openfga-bootstrap-2:
@@ -97,13 +97,13 @@ services:
       openfga-2:
         condition: service_healthy
     networks:
-      - lakehouse-network
+      - iceberg_net
     restart: no
 
 volumes:
   openfga-db-data:
 
 networks:
-  lakehouse-network:
-    name: lakehouse-network
+  iceberg_net:
     external: true
+    name: iceberg_net
