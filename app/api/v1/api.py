@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     column_mask,
     health,
+    lakekeeper,
     permissions,
     row_filter,
     trino_opa,
@@ -30,6 +31,11 @@ api_router.include_router(
 # Include column mask endpoints with /column-mask prefix
 api_router.include_router(
     column_mask.router, prefix="/column-mask", tags=["Column Masks"]
+)
+
+# Include Lakekeeper endpoints with /lakekeeper prefix
+api_router.include_router(
+    lakekeeper.router, prefix="/lakekeeper", tags=["Lakekeeper Resources"]
 )
 
 # Include Trino OPA compatible endpoints at root level

@@ -33,6 +33,25 @@ class Settings:
         # Logging
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
+        # Lakekeeper configuration
+        self.lakekeeper_management_url: str = os.getenv(
+            "LAKEKEEPER_MANAGEMENT_URL", "http://lakekeeper:8181/management"
+        )
+        self.lakekeeper_catalog_url: str = os.getenv(
+            "LAKEKEEPER_CATALOG_URL", "http://lakekeeper:8181/catalog"
+        )
+
+        # Keycloak configuration for Lakekeeper authentication
+        self.keycloak_token_url: str = os.getenv(
+            "KEYCLOAK_TOKEN_URL",
+            "http://keycloak:8080/realms/iceberg/protocol/openid-connect/token",
+        )
+        self.keycloak_client_id: str = os.getenv("KEYCLOAK_CLIENT_ID", "trino")
+        self.keycloak_client_secret: str = os.getenv(
+            "KEYCLOAK_CLIENT_SECRET", "AK48QgaKsqdEpP9PomRJw7l2T7qWGHdZ"
+        )
+        self.keycloak_scope: str = os.getenv("KEYCLOAK_SCOPE", "lakekeeper")
+
         # API configuration
         self.api_v1_prefix: str = "/api/v1"
         self.project_name: str = "Permission Management API"

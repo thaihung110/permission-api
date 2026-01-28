@@ -359,8 +359,39 @@ class PermissionService:
                                 f"No {check_relation} permission found on tables in schema: {e}"
                             )
 
+                    # Finally, check if user has any permission at warehouse level.
+                    # This enables hierarchical behaviour for SHOW TABLES when a user
+                    # has been granted access at warehouse/catalog scope only.
+                    warehouse_object_id = build_fga_catalog_object_id(catalog_name)
+                    for warehouse_relation in [
+                        "select",
+                        "describe",
+                        "modify",
+                        "create",
+                    ]:
+                        try:
+                            has_perm = await self.openfga.check_permission(
+                                user, warehouse_relation, warehouse_object_id
+                            )
+                            if has_perm:
+                                logger.info(
+                                    "ShowTables: ALLOWED - user has %s on warehouse %s "
+                                    "-> allowing tables in schema %s via hierarchical inheritance",
+                                    warehouse_relation,
+                                    catalog_name,
+                                    schema_fqn,
+                                )
+                                return PermissionCheckResponse(allowed=True)
+                        except Exception as e:
+                            logger.debug(
+                                "Error checking %s on warehouse %s for ShowTables: %s",
+                                warehouse_relation,
+                                catalog_name,
+                                e,
+                            )
+
                     logger.info(
-                        f"ShowTables: DENIED - no permissions found on tables in schema {schema_fqn}"
+                        f"ShowTables: DENIED - no permissions found on tables/schema/warehouse for schema {schema_fqn}"
                     )
 
             # Special case: ShowSchemas operation (used by FilterSchemas)
@@ -426,19 +457,48 @@ class PermissionService:
                                 f"No {check_relation} permission found on tables in schema: {e}"
                             )
 
+                    # Finally, check if user has any permission at warehouse level.
+                    # This enables hierarchical behaviour for SHOW SCHEMAS when a user
+                    # has only been granted access at warehouse/catalog scope.
+                    warehouse_object_id = build_fga_catalog_object_id(catalog_name)
+                    for warehouse_relation in [
+                        "select",
+                        "describe",
+                        "modify",
+                        "create",
+                    ]:
+                        try:
+                            has_perm = await self.openfga.check_permission(
+                                user, warehouse_relation, warehouse_object_id
+                            )
+                            if has_perm:
+                                logger.info(
+                                    "ShowSchemas: ALLOWED - user has %s on warehouse %s "
+                                    "-> allowing schema %s via hierarchical inheritance",
+                                    warehouse_relation,
+                                    catalog_name,
+                                    schema_fqn,
+                                )
+                                return PermissionCheckResponse(allowed=True)
+                        except Exception as e:
+                            logger.debug(
+                                "Error checking %s on warehouse %s for ShowSchemas: %s",
+                                warehouse_relation,
+                                catalog_name,
+                                e,
+                            )
+
                     logger.info(
-                        f"ShowSchemas: DENIED - no permissions found in namespace {schema_fqn}"
+                        f"ShowSchemas: DENIED - no permissions found in namespace/schema/warehouse for {schema_fqn}"
                     )
 
             # If not allowed at target level, check hierarchically at parent levels
             # lakekeeper_table -> check namespace -> check warehouse
-            # BUT: Skip hierarchical check for Filter operations (FilterTables, FilterSchemas, etc.)
-            # For filtering, we only show resources the user has DIRECT permission on
-            # This prevents showing all tables just because user has permission on schema
+            # BUT: Skip hierarchical check for certain filter operations where we intentionally
+            # do NOT want inheritance (currently only columns).
             filter_operations = {
-                "ShowTables",  # Used by FilterTables
-                "ShowColumns",  # Used by FilterColumns
-                "ShowSchemas",  # Used by FilterSchemas - should check at catalog level only
+                # Used by FilterColumns
+                "ShowColumns",
             }
 
             # For filter operations, don't do hierarchical check - rely on OpenFGA model's inheritance
