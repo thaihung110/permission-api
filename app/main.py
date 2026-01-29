@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from app.api.v1.api import api_router
 from app.core.config import settings
 from app.core.logging import setup_logging
+from app.external.lakekeeper_client import LakekeeperClient
 from app.external.openfga_client import OpenFGAManager
 from app.external.openfga_setup import OpenFGASetup
 
@@ -23,12 +24,13 @@ logger = logging.getLogger(__name__)
 
 # Global managers
 openfga_manager: OpenFGAManager = None
+lakekeeper_client: LakekeeperClient = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager - handles startup and shutdown"""
-    global openfga_manager
+    global openfga_manager, lakekeeper_client
 
     # Startup
     logger.info("Starting Permission Management API...")
@@ -58,8 +60,22 @@ async def lifespan(app: FastAPI):
         await openfga_manager.initialize()
         logger.info("OpenFGA manager initialized successfully")
 
+        # Step 3: Initialize Lakekeeper client with Keycloak authentication
+        lakekeeper_client = LakekeeperClient(
+            management_url=settings.lakekeeper_management_url,
+            catalog_url=settings.lakekeeper_catalog_url,
+            keycloak_token_url=settings.keycloak_token_url,
+            client_id=settings.keycloak_client_id,
+            client_secret=settings.keycloak_client_secret,
+            scope=settings.keycloak_scope,
+        )
+
+        await lakekeeper_client.initialize()
+        logger.info("Lakekeeper client initialized successfully")
+
         # Make managers available to routers
         app.state.openfga = openfga_manager
+        app.state.lakekeeper = lakekeeper_client
 
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")
@@ -69,6 +85,8 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down Permission Management API...")
+    if lakekeeper_client:
+        await lakekeeper_client.close()
     if openfga_manager:
         await openfga_manager.close()
 
