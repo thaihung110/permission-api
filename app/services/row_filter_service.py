@@ -301,12 +301,18 @@ class RowFilterService:
         """
         Build SQL WHERE clause for row filtering
 
+        Row filter is opt-in: if a user has select permission on a table but no
+        policy access, they can see all rows (no filter applied). Filters are only
+        applied for policies the user has explicit access to.
+
         Args:
             user_id: User identifier
             table_fqn: Fully qualified table name (e.g., "prod.public.customers")
 
         Returns:
             SQL WHERE clause (e.g., "region IN ('north')") or None if no filter
+            - None: No filter applied (user can see all rows if they have select permission)
+            - SQL string: Filter to apply based on user's policy access
         """
         try:
             # Get policies for table
@@ -318,18 +324,22 @@ class RowFilterService:
             # Get user's filters
             filters = await self.get_user_policy_filters(user_id, policy_ids)
             if not filters:
-                logger.warning(
-                    f"User {user_id} has no access to any policies for table {table_fqn}"
+                # User has no access to any policies - this is OK, row filter is opt-in
+                # If user has select permission on table, they can see all rows
+                logger.info(
+                    f"User {user_id} has no access to any policies for table {table_fqn}. "
+                    f"Row filter is opt-in - returning no filter (user can see all rows if they have select permission)."
                 )
-                return "1=0"  # Deny all
+                return None  # No filter - user can see all rows
 
-            # Check if user has access to all required policies
+            # User has access to some policies - apply filters only for those policies
+            # Note: It's OK if user doesn't have access to all policies - we only filter
+            # based on policies they DO have access to
             if len(filters) < len(policy_ids):
-                logger.warning(
-                    f"User {user_id} missing access to some policies for table {table_fqn}. "
-                    f"Required: {len(policy_ids)}, Found: {len(filters)}"
+                logger.info(
+                    f"User {user_id} has access to {len(filters)} out of {len(policy_ids)} policies "
+                    f"for table {table_fqn}. Applying filters only for accessible policies."
                 )
-                return "1=0"  # Deny all if missing any required policy
 
             # Build SQL clauses
             clauses = []

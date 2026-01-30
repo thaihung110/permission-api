@@ -11,11 +11,15 @@ class ListResourcesRequest(BaseModel):
     """Request to list all Lakekeeper resources with user permissions"""
 
     user_id: str = Field(..., description="User ID to check permissions for")
+    catalog: str = Field(
+        ..., description="Warehouse name (catalog) to list resources for"
+    )
 
     class Config:
         json_schema_extra = {
             "example": {
                 "user_id": "alice",
+                "catalog": "demo",
             }
         }
 

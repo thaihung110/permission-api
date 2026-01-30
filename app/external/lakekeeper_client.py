@@ -115,7 +115,9 @@ class LakekeeperClient:
             )
             raise
         except Exception as e:
-            logger.error(f"Failed to authenticate with Keycloak: {e}", exc_info=True)
+            logger.error(
+                f"Failed to authenticate with Keycloak: {e}", exc_info=True
+            )
             raise
 
     async def _get_headers(self) -> Dict[str, str]:
@@ -128,6 +130,58 @@ class LakekeeperClient:
         token = await self._authenticate()
         return {"Authorization": f"Bearer {token}"}
 
+    async def get_warehouse_config(self, warehouse_name: str) -> Optional[str]:
+        """
+        GET /v1/config?warehouse=<warehouse_name> - Returns warehouse configuration
+
+        Args:
+            warehouse_name: Warehouse name (catalog name)
+
+        Returns:
+            Warehouse ID (prefix from defaults) or None on error
+        """
+        url = f"{self.catalog_url}/v1/config"
+        params = {"warehouse": warehouse_name}
+        logger.info(
+            f"Fetching warehouse config: GET {url}?warehouse={warehouse_name}"
+        )
+
+        try:
+            headers = await self._get_headers()
+            response = await self.client.get(
+                url, headers=headers, params=params
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            defaults = data.get("defaults", {})
+            warehouse_id = defaults.get("prefix")
+
+            if not warehouse_id:
+                logger.warning(
+                    f"✗ No prefix found in warehouse config response for {warehouse_name}: {data}"
+                )
+                return None
+
+            logger.info(
+                f"✓ Fetched warehouse config for {warehouse_name}: warehouse_id={warehouse_id}"
+            )
+            logger.debug(f"  Full config response: {data}")
+            return warehouse_id
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"✗ Failed to fetch warehouse config for {warehouse_name} "
+                f"(HTTP {e.response.status_code}): {e.response.text}"
+            )
+            return None
+        except Exception as e:
+            logger.error(
+                f"✗ Failed to fetch warehouse config for {warehouse_name}: {e}",
+                exc_info=True,
+            )
+            return None
+
     async def get_warehouses(self) -> List[Dict[str, Any]]:
         """
         GET /v1/warehouse - Returns list of warehouses
@@ -138,7 +192,7 @@ class LakekeeperClient:
         """
         url = f"{self.management_url}/v1/warehouse"
         logger.info(f"Fetching warehouses: GET {url}")
-        
+
         try:
             headers = await self._get_headers()
             response = await self.client.get(url, headers=headers)
@@ -146,8 +200,10 @@ class LakekeeperClient:
 
             data = response.json()
             warehouses = data.get("warehouses", [])
-            
-            logger.info(f"✓ Fetched {len(warehouses)} warehouses from Lakekeeper")
+
+            logger.info(
+                f"✓ Fetched {len(warehouses)} warehouses from Lakekeeper"
+            )
             for wh in warehouses:
                 logger.debug(
                     f"  - Warehouse: id={wh.get('id')}, name={wh.get('name')}, "
@@ -178,7 +234,7 @@ class LakekeeperClient:
         """
         url = f"{self.catalog_url}/v1/{warehouse_id}/namespaces"
         logger.info(f"Fetching namespaces: GET {url}")
-        
+
         try:
             headers = await self._get_headers()
             response = await self.client.get(url, headers=headers)
@@ -186,12 +242,14 @@ class LakekeeperClient:
 
             data = response.json()
             namespaces = data.get("namespaces", [])
-            
+
             logger.info(
                 f"✓ Fetched {len(namespaces)} namespaces for warehouse {warehouse_id}"
             )
             for ns in namespaces:
-                logger.debug(f"  - Namespace: {'.'.join(ns) if isinstance(ns, list) else ns}")
+                logger.debug(
+                    f"  - Namespace: {'.'.join(ns) if isinstance(ns, list) else ns}"
+                )
             return namespaces
 
         except httpx.HTTPStatusError as e:
@@ -203,7 +261,7 @@ class LakekeeperClient:
         except Exception as e:
             logger.warning(
                 f"✗ Failed to fetch namespaces for warehouse {warehouse_id}: {e}",
-                exc_info=True
+                exc_info=True,
             )
             return []
 
@@ -223,7 +281,7 @@ class LakekeeperClient:
         """
         url = f"{self.catalog_url}/v1/{warehouse_id}/namespaces/{namespace_name}/tables"
         logger.info(f"Fetching tables: GET {url}")
-        
+
         try:
             headers = await self._get_headers()
             response = await self.client.get(url, headers=headers)
@@ -231,7 +289,7 @@ class LakekeeperClient:
 
             data = response.json()
             identifiers = data.get("identifiers", [])
-            
+
             logger.info(
                 f"✓ Fetched {len(identifiers)} tables for "
                 f"warehouse {warehouse_id}, namespace {namespace_name}"
@@ -251,6 +309,6 @@ class LakekeeperClient:
             logger.warning(
                 f"✗ Failed to fetch tables for warehouse {warehouse_id}, "
                 f"namespace {namespace_name}: {e}",
-                exc_info=True
+                exc_info=True,
             )
             return []

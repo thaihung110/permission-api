@@ -19,20 +19,24 @@ async def list_resources(
     request: Request,
 ):
     """
-    List all Lakekeeper resources with user permissions
+    List all Lakekeeper resources with user permissions for a specific catalog
 
-    Fetches all warehouses, namespaces, and tables from Lakekeeper,
+    Fetches namespaces and tables from Lakekeeper for the specified catalog,
     then checks which permissions [create, modify, select, describe]
     the specified user has on each resource.
 
     Returns all resources including those where the user has no permissions
     (indicated by empty permission list).
 
+    **Request:**
+    - `user_id`: User ID to check permissions for
+    - `catalog`: Warehouse name (catalog name) to list resources for
+
     **Response format:**
     - Key: resource path
-      - Warehouse: `warehouse_name`
-      - Namespace: `warehouse_name.namespace_name`
-      - Table: `warehouse_name.namespace_name.table_name`
+      - Warehouse: `catalog`
+      - Namespace: `catalog.namespace_name`
+      - Table: `catalog.namespace_name.table_name`
     - Value: list of permissions the user has on that resource
 
     **Example:**
@@ -53,6 +57,7 @@ async def list_resources(
         f"[ENDPOINT] POST /lakekeeper/list-resources\n"
         f"Request body: {request_data.model_dump()}\n"
         f"User ID: {request_data.user_id}\n"
+        f"Catalog: {request_data.catalog}\n"
         f"{'='*60}"
     )
 
@@ -71,7 +76,7 @@ async def list_resources(
         )
         service = LakekeeperService(openfga, lakekeeper)
         result = await service.list_resources_with_permissions(
-            request_data.user_id
+            request_data.user_id, request_data.catalog
         )
 
         # Log summary
