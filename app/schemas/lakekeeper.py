@@ -29,12 +29,10 @@ class ListResourcesRequest(BaseModel):
 
 
 class ColumnInfo(BaseModel):
-    """Information about a column"""
+    """Column information (internal use)"""
 
     name: str = Field(..., description="Column name")
-    masked: bool = Field(
-        False, description="Whether column is masked for this user"
-    )
+    masked: bool = Field(False, description="Whether column is masked")
 
 
 class RowFilterInfo(BaseModel):
@@ -49,58 +47,38 @@ class RowFilterInfo(BaseModel):
     )
 
 
-class TableInfo(BaseModel):
-    """Information about a table including columns and row filters"""
+class ResourceItem(BaseModel):
+    """Resource item in flat list format"""
 
-    permissions: List[str] = Field(
+    name: str = Field(
         ...,
-        description="List of permissions user has on this table ['create', 'modify', 'select', 'describe']",
+        description=(
+            "Resource path: 'warehouse', 'warehouse.namespace', "
+            "'warehouse.namespace.table', 'warehouse.namespace.table.column'"
+        ),
     )
-    columns: Optional[List[ColumnInfo]] = Field(
-        None,
-        description="List of columns in this table (if table metadata available)",
+    permissions: List[str] = Field(
+        default_factory=list,
+        description=(
+            "List of permissions. "
+            "For columns: ['mask'] if masked, [] if not. "
+            "For other resources: ['create', 'modify', 'select', 'describe']"
+        ),
     )
     row_filters: Optional[List[RowFilterInfo]] = Field(
         None,
-        description="List of row filter policies applied to this table for this user",
-    )
-
-
-class NamespaceInfo(BaseModel):
-    """Information about a namespace (schema) including tables"""
-
-    permissions: List[str] = Field(
-        ...,
-        description="List of permissions user has on this namespace ['create', 'modify', 'select', 'describe']",
-    )
-    tables: Optional[Dict[str, TableInfo]] = Field(
-        None,
-        description="Map of table names to TableInfo objects",
-    )
-
-
-class WarehouseInfo(BaseModel):
-    """Information about a warehouse (catalog) including namespaces"""
-
-    permissions: List[str] = Field(
-        ...,
-        description="List of permissions user has on this warehouse ['create', 'modify', 'select', 'describe']",
-    )
-    namespaces: Optional[Dict[str, NamespaceInfo]] = Field(
-        None,
-        description="Map of namespace names to NamespaceInfo objects",
+        description="Row filter policies (only for tables)",
     )
 
 
 class ListResourcesResponse(BaseModel):
-    """Response containing all resources with user permissions in nested structure"""
+    """Response containing all resources in flat list format"""
 
-    resources: Dict[str, WarehouseInfo] = Field(
+    resources: List[ResourceItem] = Field(
         ...,
         description=(
-            "Map of warehouse names to WarehouseInfo objects. "
-            "Structure: warehouse -> namespaces -> tables -> columns. "
-            "Each level contains permissions and nested resources."
+            "Flat list of all resources (warehouses, namespaces, tables, columns). "
+            "Each item has: name (resource path) + permissions + row_filters (for tables only)"
         ),
     )
     errors: Optional[List[Dict[str, str]]] = Field(
@@ -111,52 +89,42 @@ class ListResourcesResponse(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "resources": {
-                    "demo": {
-                        "permissions": ["select", "describe"],
-                        "namespaces": {
-                            "finance": {
-                                "permissions": ["select", "modify"],
-                                "tables": {
-                                    "user": {
-                                        "permissions": ["select"],
-                                        "columns": [
-                                            {"name": "id", "masked": False},
-                                            {
-                                                "name": "phone_number",
-                                                "masked": True,
-                                            },
-                                        ],
-                                        "row_filters": [
-                                            {
-                                                "attribute_name": "region",
-                                                "filter_expression": "region IN ('north', 'south')",
-                                            }
-                                        ],
-                                    },
-                                    "transaction": {
-                                        "permissions": [],
-                                        "columns": None,
-                                        "row_filters": None,
-                                    },
-                                },
-                            },
-                            "sales": {
-                                "permissions": ["describe"],
-                                "tables": None,
-                            },
-                        },
-                    },
-                    "prod": {
-                        "permissions": [],
-                        "namespaces": None,
-                    },
-                },
-                "errors": [
+                "resources": [
                     {
-                        "resource": "demo.marketing",
-                        "error": "Failed to fetch tables: Network timeout",
-                    }
+                        "name": "lakekeeper_demo",
+                        "permissions": ["select", "describe"],
+                    },
+                    {
+                        "name": "lakekeeper_demo.finance",
+                        "permissions": ["select", "modify"],
+                    },
+                    {
+                        "name": "lakekeeper_demo.finance.user",
+                        "permissions": ["select"],
+                        "row_filters": [
+                            {
+                                "attribute_name": "region",
+                                "filter_expression": "region IN ('north', 'south')",
+                            }
+                        ],
+                    },
+                    {
+                        "name": "lakekeeper_demo.finance.user.id",
+                        "permissions": [],
+                    },
+                    {
+                        "name": "lakekeeper_demo.finance.user.phone_number",
+                        "permissions": ["mask"],
+                    },
+                    {
+                        "name": "lakekeeper_demo.finance.transaction",
+                        "permissions": [],
+                    },
+                    {
+                        "name": "lakekeeper_demo.sales",
+                        "permissions": ["describe"],
+                    },
                 ],
+                "errors": None,
             }
         }

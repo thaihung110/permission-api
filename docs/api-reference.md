@@ -267,7 +267,7 @@ List all columns that are masked for a user on a table.
 
 **Endpoint:** `POST /api/v1/lakekeeper/list-resources`
 
-List all resources (warehouses, namespaces, tables) with user permissions, column masks, and row filters.
+List all resources (warehouses, namespaces, tables, columns) in flat list format with permissions, column masks, and row filters.
 
 **Request:**
 
@@ -282,45 +282,65 @@ List all resources (warehouses, namespaces, tables) with user permissions, colum
 
 ```json
 {
-  "resources": {
-    "lakekeeper_demo": {
-      "permissions": ["select", "describe"],
-      "namespaces": {
-        "finance": {
-          "permissions": ["select", "modify"],
-          "tables": {
-            "user": {
-              "permissions": ["select"],
-              "columns": [
-                { "name": "id", "masked": false },
-                { "name": "name", "masked": false },
-                { "name": "phone_number", "masked": true },
-                { "name": "email", "masked": true },
-                { "name": "region", "masked": false }
-              ],
-              "row_filters": [
-                {
-                  "attribute_name": "region",
-                  "filter_expression": "region IN ('north', 'south')"
-                }
-              ]
-            }
-          }
+  "resources": [
+    {
+      "name": "lakekeeper_demo",
+      "permissions": ["select", "describe"]
+    },
+    {
+      "name": "lakekeeper_demo.finance",
+      "permissions": ["select", "modify"]
+    },
+    {
+      "name": "lakekeeper_demo.finance.user",
+      "permissions": ["select"],
+      "row_filters": [
+        {
+          "attribute_name": "region",
+          "filter_expression": "region IN ('north', 'south')"
         }
-      }
+      ]
+    },
+    {
+      "name": "lakekeeper_demo.finance.user.id",
+      "permissions": []
+    },
+    {
+      "name": "lakekeeper_demo.finance.user.name",
+      "permissions": []
+    },
+    {
+      "name": "lakekeeper_demo.finance.user.phone_number",
+      "permissions": ["mask"]
+    },
+    {
+      "name": "lakekeeper_demo.finance.user.email",
+      "permissions": ["mask"]
+    },
+    {
+      "name": "lakekeeper_demo.finance.user.region",
+      "permissions": []
     }
-  },
-  "errors": null
+  ]
 }
 ```
 
-**Response Structure:**
+**Response Structure (Flat List):**
 
-- **Warehouse level**: Permissions + map of namespaces
-- **Namespace level**: Permissions + map of tables
-- **Table level**: Permissions + columns + row_filters
-- **Column**: name + masked status
-- **Row Filter**: attribute_name + filter_expression
+- Each resource: `name` (path) + `permissions` (array)
+- **Resource naming:**
+  - Warehouse: `catalog_name`
+  - Namespace: `catalog_name.namespace_name`
+  - Table: `catalog_name.namespace_name.table_name`
+  - Column: `catalog_name.namespace_name.table_name.column_name`
+- **Permissions:**
+  - Warehouses/Namespaces/Tables: `["create", "modify", "select", "describe"]`
+  - Columns: `["mask"]` if masked, `[]` if not masked
+- **Row Filters:**
+  - Field `row_filters` only appears on table items (when user has row filter policies)
+  - Array of filter policies with `attribute_name` and `filter_expression`
+- **Errors:**
+  - Field `errors` only appears when there are errors during resource fetching
 
 ---
 

@@ -10,10 +10,8 @@ from app.external.openfga_client import OpenFGAManager
 from app.schemas.lakekeeper import (
     ColumnInfo,
     ListResourcesResponse,
-    NamespaceInfo,
+    ResourceItem,
     RowFilterInfo,
-    TableInfo,
-    WarehouseInfo,
 )
 from app.services.row_filter_service import RowFilterService, escape_sql_value
 from app.utils.operation_mapper import build_user_identifier
@@ -83,7 +81,7 @@ class LakekeeperService:
             f"========================================"
         )
 
-        resources = {}
+        resources = []  # Changed to list for flat structure
         errors = []
 
         # Build user identifier for OpenFGA
@@ -161,15 +159,20 @@ class LakekeeperService:
             f"✓ Warehouse '{catalog_name}' permissions: {warehouse_permissions}"
         )
 
+        # Add warehouse to flat list
+        resources.append(
+            ResourceItem(
+                name=catalog_name,
+                permissions=warehouse_permissions,
+            )
+        )
+
         # Step 3: Fetch namespaces for this warehouse
         logger.info(f"Fetching namespaces for warehouse: {warehouse_name}")
         namespaces = await self.lakekeeper.get_namespaces(warehouse_id)
         logger.info(
             f"Found {len(namespaces)} namespaces in warehouse '{warehouse_name}'"
         )
-
-        # Build nested structure for namespaces
-        namespaces_dict = {}
 
         # Step 4: Process each namespace
         for ns_idx, namespace_parts in enumerate(namespaces, 1):
@@ -204,8 +207,13 @@ class LakekeeperService:
                 f"  ✓ Namespace '{resource_path}' permissions: {namespace_permissions}"
             )
 
-            # Build nested structure for tables
-            tables_dict = {}
+            # Add namespace to flat list
+            resources.append(
+                ResourceItem(
+                    name=resource_path,
+                    permissions=namespace_permissions,
+                )
+            )
 
             # Step 5: Fetch tables for this namespace
             try:
@@ -260,12 +268,25 @@ class LakekeeperService:
                         user_id,
                     )
 
-                    # Create TableInfo object and add to tables dict
-                    tables_dict[table_name] = TableInfo(
-                        permissions=table_permissions,
-                        columns=columns if columns else None,
-                        row_filters=row_filters if row_filters else None,
+                    # Add table to flat list
+                    resources.append(
+                        ResourceItem(
+                            name=table_resource_path,
+                            permissions=table_permissions,
+                            row_filters=row_filters if row_filters else None,
+                        )
                     )
+
+                    # Add columns to flat list
+                    for column in columns:
+                        column_path = f"{table_resource_path}.{column.name}"
+                        column_permissions = ["mask"] if column.masked else []
+                        resources.append(
+                            ResourceItem(
+                                name=column_path,
+                                permissions=column_permissions,
+                            )
+                        )
 
                     logger.info(
                         f"    ✓ Table '{table_resource_path}' permissions: {table_permissions}, "
@@ -286,26 +307,10 @@ class LakekeeperService:
                     }
                 )
 
-            # Create NamespaceInfo and add to namespaces dict
-            namespaces_dict[namespace_name] = NamespaceInfo(
-                permissions=namespace_permissions,
-                tables=tables_dict if tables_dict else None,
-            )
-
-        # Create WarehouseInfo with nested structure
-        warehouse_info = WarehouseInfo(
-            permissions=warehouse_permissions,
-            namespaces=namespaces_dict if namespaces_dict else None,
-        )
-
-        # Add warehouse to resources
-        resources[catalog_name] = warehouse_info
-
         logger.info(
             f"\n========================================\n"
             f"✓ Completed listing resources\n"
-            f"  - Warehouse: {catalog_name}\n"
-            f"  - Namespaces: {len(namespaces_dict)}\n"
+            f"  - Total resources: {len(resources)}\n"
             f"  - Errors encountered: {len(errors)}\n"
             f"========================================"
         )
