@@ -325,6 +325,64 @@ GET /api/v1/lakekeeper/list-resources?user_id=analyst&catalog=lakekeeper_demo
 
 ---
 
+## Tenant Management APIs
+
+### 1. Add User to Tenant
+
+**Endpoint:** `POST /api/v1/permissions/grant`
+
+Add a user as member of a tenant. Once added, user inherits all permissions granted to `tenant#member`.
+
+**Request:**
+
+```json
+{
+  "user_id": "cfb55bf6-fcbb-4a1e-bfec-30c6649b52f8",
+  "user_type": "user",
+  "resource": {
+    "tenant": "viettel"
+  },
+  "relation": "member"
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "Permission granted successfully"
+}
+```
+
+### 2. Remove User from Tenant
+
+**Endpoint:** `POST /api/v1/permissions/revoke`
+
+Remove a user from tenant membership.
+
+**Request:**
+
+```json
+{
+  "user_id": "cfb55bf6-fcbb-4a1e-bfec-30c6649b52f8",
+  "user_type": "user",
+  "resource": {
+    "tenant": "viettel"
+  },
+  "relation": "member"
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "Permission revoked successfully"
+}
+```
+
 ## Notes
 
 ### User Types
