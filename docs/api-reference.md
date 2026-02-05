@@ -141,7 +141,7 @@ Batch check which columns need masking. Returns mask expressions for masked colu
     "context": {
       "identity": {
         "user": "cfb55bf6-fcbb-4a1e-bfec-30c6649b52f8",
-        "groups": []
+        "groups": ["viettel"]
       },
       "softwareStack": { "trinoVersion": "467" }
     },
