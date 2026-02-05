@@ -7,32 +7,13 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 
 
-class ListResourcesRequest(BaseModel):
-    """Request to list all Lakekeeper resources with user permissions"""
-
-    user_id: str = Field(..., description="User ID to check permissions for")
-    catalog: str = Field(
-        ...,
-        description=(
-            "Trino catalog name (e.g., 'lakekeeper_demo'). "
-            "The 'lakekeeper_' prefix will be removed to get the Lakekeeper warehouse name."
-        ),
-    )
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "user_id": "alice",
-                "catalog": "lakekeeper_demo",
-            }
-        }
-
-
 class ColumnInfo(BaseModel):
-    """Column information (internal use)"""
+    """Information about a column"""
 
     name: str = Field(..., description="Column name")
-    masked: bool = Field(False, description="Whether column is masked")
+    masked: bool = Field(
+        False, description="Whether column is masked for this user"
+    )
 
 
 class RowFilterInfo(BaseModel):
@@ -47,39 +28,63 @@ class RowFilterInfo(BaseModel):
     )
 
 
-class ResourceItem(BaseModel):
-    """Resource item in flat list format"""
+class TableInfo(BaseModel):
+    """Information about a table including columns and row filters"""
 
-    name: str = Field(
-        ...,
-        description=(
-            "Resource path: 'warehouse', 'warehouse.namespace', "
-            "'warehouse.namespace.table', 'warehouse.namespace.table.column'"
-        ),
-    )
+    name: str = Field(..., description="Table name")
     permissions: List[str] = Field(
-        default_factory=list,
-        description=(
-            "List of permissions. "
-            "For columns: ['mask'] if masked, [] if not. "
-            "For other resources: ['create', 'modify', 'select', 'describe']"
-        ),
+        ...,
+        description="List of permissions user has on this table ['create', 'modify', 'select', 'describe']",
+    )
+    columns: Optional[List[ColumnInfo]] = Field(
+        None,
+        description="List of columns in this table (if table metadata available)",
     )
     row_filters: Optional[List[RowFilterInfo]] = Field(
         None,
-        description="Row filter policies (only for tables)",
+        description="List of row filter policies applied to this table for this user",
+    )
+
+
+class NamespaceInfo(BaseModel):
+    """Information about a namespace (schema) including tables"""
+
+    name: str = Field(..., description="Namespace name")
+    permissions: List[str] = Field(
+        ...,
+        description="List of permissions user has on this namespace ['create', 'modify', 'select', 'describe']",
+    )
+    tables: Optional[List[TableInfo]] = Field(
+        None,
+        description="List of tables in this namespace",
+    )
+
+
+class WarehouseInfo(BaseModel):
+    """Information about a warehouse (catalog) including namespaces"""
+
+    name: str = Field(..., description="Warehouse name (catalog name)")
+    permissions: List[str] = Field(
+        ...,
+        description="List of permissions user has on this warehouse ['create', 'modify', 'select', 'describe']",
+    )
+    namespaces: Optional[List[NamespaceInfo]] = Field(
+        None,
+        description="List of namespaces in this warehouse",
     )
 
 
 class ListResourcesResponse(BaseModel):
-    """Response containing all resources in flat list format"""
+    """Response containing warehouse with permissions and nested resources"""
 
-    resources: List[ResourceItem] = Field(
+    name: str = Field(..., description="Warehouse name (catalog name)")
+    permissions: List[str] = Field(
         ...,
-        description=(
-            "Flat list of all resources (warehouses, namespaces, tables, columns). "
-            "Each item has: name (resource path) + permissions + row_filters (for tables only)"
-        ),
+        description="List of permissions user has on this warehouse ['create', 'modify', 'select', 'describe']",
+    )
+    namespaces: Optional[List[NamespaceInfo]] = Field(
+        None,
+        description="List of namespaces in this warehouse",
     )
     errors: Optional[List[Dict[str, str]]] = Field(
         default=None,
@@ -89,42 +94,46 @@ class ListResourcesResponse(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "resources": [
+                "name": "lakekeeper_demo",
+                "permissions": ["select", "describe"],
+                "namespaces": [
                     {
-                        "name": "lakekeeper_demo",
-                        "permissions": ["select", "describe"],
-                    },
-                    {
-                        "name": "lakekeeper_demo.finance",
+                        "name": "finance",
                         "permissions": ["select", "modify"],
-                    },
-                    {
-                        "name": "lakekeeper_demo.finance.user",
-                        "permissions": ["select"],
-                        "row_filters": [
+                        "tables": [
                             {
-                                "attribute_name": "region",
-                                "filter_expression": "region IN ('north', 'south')",
-                            }
+                                "name": "user",
+                                "permissions": ["select"],
+                                "columns": [
+                                    {"name": "id", "masked": False},
+                                    {"name": "phone_number", "masked": True},
+                                ],
+                                "row_filters": [
+                                    {
+                                        "attribute_name": "region",
+                                        "filter_expression": "region IN ('north', 'south')",
+                                    }
+                                ],
+                            },
+                            {
+                                "name": "transaction",
+                                "permissions": [],
+                                "columns": None,
+                                "row_filters": None,
+                            },
                         ],
                     },
                     {
-                        "name": "lakekeeper_demo.finance.user.id",
-                        "permissions": [],
-                    },
-                    {
-                        "name": "lakekeeper_demo.finance.user.phone_number",
-                        "permissions": ["mask"],
-                    },
-                    {
-                        "name": "lakekeeper_demo.finance.transaction",
-                        "permissions": [],
-                    },
-                    {
-                        "name": "lakekeeper_demo.sales",
+                        "name": "sales",
                         "permissions": ["describe"],
+                        "tables": None,
                     },
                 ],
-                "errors": None,
+                "errors": [
+                    {
+                        "resource": "lakekeeper_demo.marketing",
+                        "error": "Failed to fetch tables: Network timeout",
+                    }
+                ],
             }
         }

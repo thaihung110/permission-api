@@ -10,8 +10,10 @@ from app.external.openfga_client import OpenFGAManager
 from app.schemas.lakekeeper import (
     ColumnInfo,
     ListResourcesResponse,
-    ResourceItem,
+    NamespaceInfo,
     RowFilterInfo,
+    TableInfo,
+    WarehouseInfo,
 )
 from app.services.row_filter_service import RowFilterService, escape_sql_value
 from app.utils.operation_mapper import build_user_identifier
@@ -81,7 +83,6 @@ class LakekeeperService:
             f"========================================"
         )
 
-        resources = []  # Changed to list for flat structure
         errors = []
 
         # Build user identifier for OpenFGA
@@ -137,8 +138,10 @@ class LakekeeperService:
                 }
             )
             return ListResourcesResponse(
-                resources=resources,
-                errors=errors if errors else None,
+                name=catalog_name,
+                permissions=[],
+                namespaces=None,
+                errors=errors,
             )
 
         logger.info(
@@ -159,20 +162,15 @@ class LakekeeperService:
             f"✓ Warehouse '{catalog_name}' permissions: {warehouse_permissions}"
         )
 
-        # Add warehouse to flat list
-        resources.append(
-            ResourceItem(
-                name=catalog_name,
-                permissions=warehouse_permissions,
-            )
-        )
-
         # Step 3: Fetch namespaces for this warehouse
         logger.info(f"Fetching namespaces for warehouse: {warehouse_name}")
         namespaces = await self.lakekeeper.get_namespaces(warehouse_id)
         logger.info(
             f"Found {len(namespaces)} namespaces in warehouse '{warehouse_name}'"
         )
+
+        # Build nested structure for namespaces as list
+        namespaces_list = []
 
         # Step 4: Process each namespace
         for ns_idx, namespace_parts in enumerate(namespaces, 1):
@@ -207,13 +205,8 @@ class LakekeeperService:
                 f"  ✓ Namespace '{resource_path}' permissions: {namespace_permissions}"
             )
 
-            # Add namespace to flat list
-            resources.append(
-                ResourceItem(
-                    name=resource_path,
-                    permissions=namespace_permissions,
-                )
-            )
+            # Build nested structure for tables as list
+            tables_list = []
 
             # Step 5: Fetch tables for this namespace
             try:
@@ -268,25 +261,15 @@ class LakekeeperService:
                         user_id,
                     )
 
-                    # Add table to flat list
-                    resources.append(
-                        ResourceItem(
-                            name=table_resource_path,
+                    # Create TableInfo object and add to tables list
+                    tables_list.append(
+                        TableInfo(
+                            name=table_name,  # Table name only (not FQN)
                             permissions=table_permissions,
+                            columns=columns if columns else None,
                             row_filters=row_filters if row_filters else None,
                         )
                     )
-
-                    # Add columns to flat list
-                    for column in columns:
-                        column_path = f"{table_resource_path}.{column.name}"
-                        column_permissions = ["mask"] if column.masked else []
-                        resources.append(
-                            ResourceItem(
-                                name=column_path,
-                                permissions=column_permissions,
-                            )
-                        )
 
                     logger.info(
                         f"    ✓ Table '{table_resource_path}' permissions: {table_permissions}, "
@@ -307,16 +290,29 @@ class LakekeeperService:
                     }
                 )
 
+            # Create NamespaceInfo and add to namespaces list
+            namespaces_list.append(
+                NamespaceInfo(
+                    name=namespace_name,
+                    permissions=namespace_permissions,
+                    tables=tables_list if tables_list else None,
+                )
+            )
+
         logger.info(
             f"\n========================================\n"
             f"✓ Completed listing resources\n"
-            f"  - Total resources: {len(resources)}\n"
+            f"  - Warehouse: {catalog_name}\n"
+            f"  - Namespaces: {len(namespaces_list)}\n"
             f"  - Errors encountered: {len(errors)}\n"
             f"========================================"
         )
 
+        # Return ListResourcesResponse with warehouse info
         return ListResourcesResponse(
-            resources=resources,
+            name=catalog_name,
+            permissions=warehouse_permissions,
+            namespaces=namespaces_list if namespaces_list else None,
             errors=errors if errors else None,
         )
 

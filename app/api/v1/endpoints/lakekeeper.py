@@ -4,23 +4,23 @@ Lakekeeper endpoints - API for listing Lakekeeper resources with permissions
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.schemas.lakekeeper import ListResourcesRequest, ListResourcesResponse
+from app.schemas.lakekeeper import ListResourcesResponse
 from app.services.lakekeeper_service import LakekeeperService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post(
-    "/list-resources",
-    response_model=ListResourcesResponse,
-    response_model_exclude_none=True,
-)
+@router.get("/list-resources", response_model=ListResourcesResponse)
 async def list_resources(
-    request_data: ListResourcesRequest,
     request: Request,
+    user_id: str = Query(..., description="User ID to check permissions for"),
+    catalog: str = Query(
+        ...,
+        description="Trino catalog name (e.g., 'lakekeeper_demo'). The 'lakekeeper_' prefix will be removed to get the Lakekeeper warehouse name.",
+    ),
 ):
     """
     List all Lakekeeper resources with user permissions for a specific catalog
@@ -29,45 +29,48 @@ async def list_resources(
     then checks which permissions [create, modify, select, describe]
     the specified user has on each resource.
 
-    Returns all resources in flat list format.
+    Returns warehouse with nested namespaces and tables.
 
-    **Request:**
+    **Query Parameters:**
     - `user_id`: User ID to check permissions for
-    - `catalog`: Trino catalog name (e.g., 'lakekeeper_demo').
-                 The 'lakekeeper_' prefix will be removed to get the Lakekeeper warehouse name.
+    - `catalog`: Trino catalog name (e.g., 'lakekeeper_demo')
 
     **Response format:**
-    Flat list of resources with:
-    - `name`: Resource path (warehouse, warehouse.namespace, warehouse.namespace.table, etc.)
-    - `permissions`: Array of permissions
-    - `row_filters`: Array of row filter policies (tables only)
-
-    **Example:**
     ```json
     {
-      "resources": [
-        {"name": "lakekeeper_demo", "permissions": ["select", "describe"]},
-        {"name": "lakekeeper_demo.finance", "permissions": ["select", "modify"]},
+      "name": "lakekeeper_demo",
+      "permissions": ["select", "describe"],
+      "namespaces": [
         {
-          "name": "lakekeeper_demo.finance.user",
-          "permissions": ["select"],
-          "row_filters": [
-            {"attribute_name": "region", "filter_expression": "region IN ('north')"}
+          "name": "finance",
+          "permissions": ["select", "modify"],
+          "tables": [
+            {
+              "name": "user",
+              "permissions": ["select"],
+              "columns": [
+                {"name": "id", "masked": false},
+                {"name": "phone_number", "masked": true}
+              ],
+              "row_filters": [
+                {
+                  "attribute_name": "region",
+                  "filter_expression": "region IN ('north', 'south')"
+                }
+              ]
+            }
           ]
-        },
-        {"name": "lakekeeper_demo.finance.user.id", "permissions": []},
-        {"name": "lakekeeper_demo.finance.user.phone_number", "permissions": ["mask"]}
+        }
       ],
-      "errors": null
+      "errors": []
     }
     ```
     """
     logger.info(
         f"\n{'='*60}\n"
-        f"[ENDPOINT] POST /lakekeeper/list-resources\n"
-        f"Request body: {request_data.model_dump()}\n"
-        f"User ID: {request_data.user_id}\n"
-        f"Catalog (Trino): {request_data.catalog}\n"
+        f"[ENDPOINT] GET /lakekeeper/list-resources\n"
+        f"User ID: {user_id}\n"
+        f"Catalog (Trino): {catalog}\n"
         f"{'='*60}"
     )
 
@@ -85,36 +88,32 @@ async def list_resources(
             "[ENDPOINT] Creating LakekeeperService and processing request..."
         )
         service = LakekeeperService(openfga, lakekeeper)
-        result = await service.list_resources_with_permissions(
-            request_data.user_id, request_data.catalog
-        )
+        result = await service.list_resources_with_permissions(user_id, catalog)
 
-        # Log summary - count resources by type (based on dots in name)
-        total_resources = len(result.resources)
-        warehouses = sum(1 for r in result.resources if "." not in r.name)
-        namespaces = sum(1 for r in result.resources if r.name.count(".") == 1)
-        tables = sum(1 for r in result.resources if r.name.count(".") == 2)
-        columns = sum(1 for r in result.resources if r.name.count(".") == 3)
+        # Log summary
+        total_namespaces = len(result.namespaces) if result.namespaces else 0
+        total_tables = sum(
+            len(ns.tables) if ns.tables else 0
+            for ns in (result.namespaces or [])
+        )
 
         logger.info(
             f"\n{'='*60}\n"
             f"[ENDPOINT] Request completed successfully\n"
             f"Summary:\n"
-            f"  - Total resources: {total_resources}\n"
-            f"  - Warehouses: {warehouses}\n"
-            f"  - Namespaces: {namespaces}\n"
-            f"  - Tables: {tables}\n"
-            f"  - Columns: {columns}\n"
+            f"  - Warehouse: {result.name}\n"
+            f"  - Namespaces: {total_namespaces}\n"
+            f"  - Tables: {total_tables}\n"
             f"  - Errors encountered: {len(result.errors) if result.errors else 0}\n"
             f"{'='*60}"
         )
 
         # Log detailed response (truncated for large responses)
-        if total_resources <= 50:
+        if total_tables <= 20:
             logger.debug(f"[ENDPOINT] Response: {result.model_dump()}")
         else:
             logger.debug(
-                f"[ENDPOINT] Response contains {total_resources} resources "
+                f"[ENDPOINT] Response contains {total_tables} tables "
                 f"(too large to log in full)"
             )
 
