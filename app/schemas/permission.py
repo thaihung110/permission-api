@@ -35,6 +35,9 @@ class ResourceSpec(BaseModel):
     project: Optional[str] = Field(
         None, description="Project name (e.g., 'lakekeeper')"
     )
+    tenant: Optional[str] = Field(
+        None, description="Tenant name (e.g., 'viettel', 'acme_corp')"
+    )
 
 
 class PermissionCheckRequest(BaseModel):

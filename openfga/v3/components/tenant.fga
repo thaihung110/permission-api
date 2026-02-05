@@ -1,0 +1,15 @@
+module tenant
+
+type tenant
+  relations
+    # Users who are members of this tenant
+    define member: [user, tenant#member]
+    
+    # Admin can manage the tenant
+    define admin: [user]
+    
+    # ------------------ Actions ------------------
+    # Can manage tenant members
+    define can_manage_members: admin
+    # Can read tenant information
+    define can_read: member or admin

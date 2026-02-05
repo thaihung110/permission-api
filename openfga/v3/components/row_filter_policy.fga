@@ -5,7 +5,7 @@ type row_filter_policy
     define applies_to: [lakekeeper_table]
 
     # Users allowed under this policy (with attribute filter in condition)
-    define viewer: [user with has_attribute_access, role#assignee with has_attribute_access]
+    define viewer: [user with has_attribute_access, role#assignee with has_attribute_access, tenant#member with has_attribute_access]
 
     # Admin can manage policy
     define admin: [user]

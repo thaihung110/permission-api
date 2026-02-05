@@ -6,14 +6,14 @@ type lakekeeper_table
     define parent: [namespace]
 
     # ------------------ Special roles ------------------
-    define ownership: [user, role#assignee]
+    define ownership: [user, role#assignee, tenant#member]
 
     # ------------------ Assignable Privileges ------------------
-    define pass_grants: [user, role#assignee]
-    define manage_grants: [user, role#assignee] or (ownership but not managed_access_inheritance from parent) or manage_grants from parent
-    define describe: [user, role#assignee] or ownership or select or describe from parent
-    define select: [user, role#assignee] or ownership or modify or select from parent
-    define modify: [user, role#assignee] or ownership or modify from parent
+    define pass_grants: [user, role#assignee, tenant#member]
+    define manage_grants: [user, role#assignee, tenant#member] or (ownership but not managed_access_inheritance from parent) or manage_grants from parent
+    define describe: [user, role#assignee, tenant#member] or ownership or select or describe from parent
+    define select: [user, role#assignee, tenant#member] or ownership or modify or select from parent
+    define modify: [user, role#assignee, tenant#member] or ownership or modify from parent
 
     # ------------------ Actions ------------------
     define can_drop: modify

@@ -7,13 +7,23 @@ from typing import Any, Dict, List, Set
 
 from app.external.lakekeeper_client import LakekeeperClient
 from app.external.openfga_client import OpenFGAManager
-from app.schemas.lakekeeper import ListResourcesResponse
+from app.schemas.lakekeeper import (
+    ColumnInfo,
+    ListResourcesResponse,
+    NamespaceInfo,
+    RowFilterInfo,
+    TableInfo,
+    WarehouseInfo,
+)
+from app.services.row_filter_service import RowFilterService, escape_sql_value
 from app.utils.operation_mapper import build_user_identifier
 from app.utils.type_mapper import (
+    FGA_TYPE_COLUMN,
     FGA_TYPE_LAKEKEEPER_TABLE,
     FGA_TYPE_NAMESPACE,
     FGA_TYPE_WAREHOUSE,
     build_fga_catalog_object_id,
+    build_fga_column_object_id,
     build_fga_schema_object_id,
     build_fga_table_object_id,
 )
@@ -61,7 +71,8 @@ class LakekeeperService:
 
         Args:
             user_id: User ID to check permissions for
-            catalog: Warehouse name (catalog name) to list resources for
+            catalog: Trino catalog name (e.g., 'lakekeeper_demo').
+                    Will be parsed to extract Lakekeeper warehouse name by removing 'lakekeeper_' prefix.
 
         Returns:
             ListResourcesResponse with resources and their permissions
@@ -79,6 +90,23 @@ class LakekeeperService:
         user = build_user_identifier(user_id)
         logger.info(f"OpenFGA user identifier: {user}")
 
+        # Parse Trino catalog name to Lakekeeper warehouse name
+        # Trino catalog: "lakekeeper_demo" -> Lakekeeper warehouse: "demo"
+        if catalog.startswith("lakekeeper_"):
+            warehouse_name = catalog.replace("lakekeeper_", "", 1)
+            catalog_name = catalog  # Keep original as catalog_name for OpenFGA
+        else:
+            # If no prefix, assume catalog is already warehouse name (backward compatibility)
+            warehouse_name = catalog
+            catalog_name = f"lakekeeper_{catalog}"
+
+        logger.info(
+            f"Catalog name parsing:\n"
+            f"  - Input (Trino catalog): {catalog}\n"
+            f"  - Warehouse name (Lakekeeper): {warehouse_name}\n"
+            f"  - Catalog name (OpenFGA): {catalog_name}"
+        )
+
         # Step 1: Pre-fetch all permissions from OpenFGA using list_objects()
         # This is much more efficient than checking each resource individually
         logger.info("STEP 1: Pre-fetching all permissions from OpenFGA...")
@@ -91,12 +119,18 @@ class LakekeeperService:
             f"✓ Built permission cache with {total_permissions} total object permissions"
         )
 
-        # Step 2: Get warehouse_id from catalog config
-        logger.info(f"STEP 2: Fetching warehouse config for catalog: {catalog}")
-        warehouse_id = await self.lakekeeper.get_warehouse_config(catalog)
+        # Step 2: Get warehouse_id from catalog config using warehouse_name
+        logger.info(
+            f"STEP 2: Fetching warehouse config for warehouse: {warehouse_name}"
+        )
+        warehouse_id = await self.lakekeeper.get_warehouse_config(
+            warehouse_name
+        )
 
         if not warehouse_id:
-            error_msg = f"Failed to get warehouse_id for catalog: {catalog}"
+            error_msg = (
+                f"Failed to get warehouse_id for warehouse: {warehouse_name}"
+            )
             logger.error(error_msg)
             errors.append(
                 {
@@ -111,14 +145,11 @@ class LakekeeperService:
 
         logger.info(
             f"\n========================================\n"
-            f"Processing catalog: {catalog}\n"
+            f"Processing warehouse: {warehouse_name}\n"
             f"  - Warehouse ID: {warehouse_id}\n"
+            f"  - Catalog name (OpenFGA): {catalog_name}\n"
             f"========================================"
         )
-
-        # Map catalog to catalog name: "lakekeeper_" + catalog
-        catalog_name = f"lakekeeper_{catalog}"
-        logger.info(f"Catalog name mapping: {catalog} → {catalog_name}")
 
         # Get warehouse permissions from cache
         warehouse_object_id = build_fga_catalog_object_id(catalog_name)
@@ -126,17 +157,19 @@ class LakekeeperService:
             warehouse_object_id, permission_cache
         )
         # Use catalog_name in response (lakekeeper_demo) instead of catalog (demo)
-        resources[catalog_name] = warehouse_permissions
         logger.info(
             f"✓ Warehouse '{catalog_name}' permissions: {warehouse_permissions}"
         )
 
         # Step 3: Fetch namespaces for this warehouse
-        logger.info(f"Fetching namespaces for catalog: {catalog}")
+        logger.info(f"Fetching namespaces for warehouse: {warehouse_name}")
         namespaces = await self.lakekeeper.get_namespaces(warehouse_id)
         logger.info(
-            f"Found {len(namespaces)} namespaces in catalog '{catalog}'"
+            f"Found {len(namespaces)} namespaces in warehouse '{warehouse_name}'"
         )
+
+        # Build nested structure for namespaces
+        namespaces_dict = {}
 
         # Step 4: Process each namespace
         for ns_idx, namespace_parts in enumerate(namespaces, 1):
@@ -167,10 +200,12 @@ class LakekeeperService:
             namespace_permissions = self._get_permissions_from_cache(
                 namespace_object_id, permission_cache
             )
-            resources[resource_path] = namespace_permissions
             logger.info(
                 f"  ✓ Namespace '{resource_path}' permissions: {namespace_permissions}"
             )
+
+            # Build nested structure for tables
+            tables_dict = {}
 
             # Step 5: Fetch tables for this namespace
             try:
@@ -207,9 +242,35 @@ class LakekeeperService:
                     table_permissions = self._get_permissions_from_cache(
                         table_object_id, permission_cache
                     )
-                    resources[table_resource_path] = table_permissions
+
+                    # Fetch table metadata and process columns
+                    columns = await self._fetch_and_process_columns(
+                        warehouse_id,
+                        namespace_name,
+                        table_name,
+                        catalog_name,
+                        user,
+                    )
+
+                    # Fetch row filter policies for this table
+                    row_filters = await self._fetch_row_filters(
+                        catalog_name,
+                        namespace_name,
+                        table_name,
+                        user_id,
+                    )
+
+                    # Create TableInfo object and add to tables dict
+                    tables_dict[table_name] = TableInfo(
+                        permissions=table_permissions,
+                        columns=columns if columns else None,
+                        row_filters=row_filters if row_filters else None,
+                    )
+
                     logger.info(
-                        f"    ✓ Table '{table_resource_path}' permissions: {table_permissions}"
+                        f"    ✓ Table '{table_resource_path}' permissions: {table_permissions}, "
+                        f"columns: {len(columns) if columns else 0}, "
+                        f"row_filters: {len(row_filters) if row_filters else 0}"
                     )
 
             except Exception as e:
@@ -225,10 +286,26 @@ class LakekeeperService:
                     }
                 )
 
+            # Create NamespaceInfo and add to namespaces dict
+            namespaces_dict[namespace_name] = NamespaceInfo(
+                permissions=namespace_permissions,
+                tables=tables_dict if tables_dict else None,
+            )
+
+        # Create WarehouseInfo with nested structure
+        warehouse_info = WarehouseInfo(
+            permissions=warehouse_permissions,
+            namespaces=namespaces_dict if namespaces_dict else None,
+        )
+
+        # Add warehouse to resources
+        resources[catalog_name] = warehouse_info
+
         logger.info(
             f"\n========================================\n"
             f"✓ Completed listing resources\n"
-            f"  - Total resources: {len(resources)}\n"
+            f"  - Warehouse: {catalog_name}\n"
+            f"  - Namespaces: {len(namespaces_dict)}\n"
             f"  - Errors encountered: {len(errors)}\n"
             f"========================================"
         )
@@ -322,3 +399,202 @@ class LakekeeperService:
                 granted.append(relation)
 
         return granted
+
+    async def _fetch_and_process_columns(
+        self,
+        warehouse_id: str,
+        namespace_name: str,
+        table_name: str,
+        catalog_name: str,
+        user: str,
+    ) -> List[ColumnInfo]:
+        """
+        Fetch table metadata and process columns with mask information
+
+        Args:
+            warehouse_id: Warehouse UUID
+            namespace_name: Namespace name
+            table_name: Table name
+            catalog_name: Catalog name (for OpenFGA object ID)
+            user: User identifier for permission checks
+
+        Returns:
+            List of ColumnInfo objects, or empty list if metadata unavailable
+        """
+        try:
+            # Fetch table metadata from Lakekeeper
+            table_metadata = await self.lakekeeper.get_table_metadata(
+                warehouse_id, namespace_name, table_name
+            )
+
+            if not table_metadata:
+                logger.debug(
+                    f"      No metadata available for {namespace_name}.{table_name}"
+                )
+                return []
+
+            # Extract schemas from metadata
+            metadata = table_metadata.get("metadata", {})
+            schemas = metadata.get("schemas", [])
+
+            if not schemas:
+                logger.debug(
+                    f"      No schemas found in metadata for {namespace_name}.{table_name}"
+                )
+                return []
+
+            # Get the latest schema (usually the first one or with highest schema-id)
+            # For simplicity, use the first schema
+            schema = schemas[0]
+            fields = schema.get("fields", [])
+
+            if not fields:
+                logger.debug(
+                    f"      No fields found in schema for {namespace_name}.{table_name}"
+                )
+                return []
+
+            logger.debug(
+                f"      Processing {len(fields)} columns for {namespace_name}.{table_name}"
+            )
+
+            # Process each column
+            columns = []
+            for field in fields:
+                column_name = field.get("name")
+
+                if not column_name:
+                    logger.warning(
+                        f"        Skipping field with no name: {field}"
+                    )
+                    continue
+
+                # Build column object ID for OpenFGA
+                column_object_id = build_fga_column_object_id(
+                    catalog_name, namespace_name, table_name, column_name
+                )
+
+                # Check if user has mask permission on this column
+                has_mask = await self.openfga.check_permission(
+                    user=user,
+                    relation="mask",
+                    object_id=column_object_id,
+                )
+
+                columns.append(
+                    ColumnInfo(
+                        name=column_name,
+                        masked=has_mask,
+                    )
+                )
+
+            logger.debug(
+                f"      ✓ Processed {len(columns)} columns, "
+                f"{sum(1 for c in columns if c.masked)} masked"
+            )
+            return columns
+
+        except Exception as e:
+            logger.warning(
+                f"      ✗ Failed to fetch/process columns for {namespace_name}.{table_name}: {e}",
+                exc_info=True,
+            )
+            return []
+
+    async def _fetch_row_filters(
+        self,
+        catalog_name: str,
+        namespace_name: str,
+        table_name: str,
+        user_id: str,
+    ) -> List[RowFilterInfo]:
+        """
+        Fetch row filter policies for a table that user has access to
+
+        Args:
+            catalog_name: Catalog name (for OpenFGA object ID)
+            namespace_name: Namespace name
+            table_name: Table name
+            user_id: User identifier (can be with or without "user:" prefix)
+
+        Returns:
+            List of RowFilterInfo objects, or empty list if no filters
+        """
+        try:
+            # Build table FQN for OpenFGA
+            table_fqn = f"{catalog_name}.{namespace_name}.{table_name}"
+
+            # Strip "user:" prefix if present, since get_user_policy_filters expects raw user_id
+            raw_user_id = (
+                user_id.replace("user:", "")
+                if user_id.startswith("user:")
+                else user_id
+            )
+
+            logger.debug(
+                f"      Fetching row filters for {table_fqn}, user={raw_user_id}"
+            )
+
+            # Create RowFilterService instance
+            row_filter_service = RowFilterService(self.openfga)
+
+            # Get all policies for this table
+            policy_ids = await row_filter_service.get_table_policies(table_fqn)
+
+            if not policy_ids:
+                logger.debug(f"      No row filter policies for {table_fqn}")
+                return []
+
+            logger.debug(
+                f"      Found {len(policy_ids)} row filter policies for {table_fqn}"
+            )
+
+            # Get user's filters (policies that user has access to)
+            # Note: tenant_id is None here since we don't have tenant context in list-resources
+            filters = await row_filter_service.get_user_policy_filters(
+                raw_user_id, policy_ids, tenant_id=None
+            )
+
+            if not filters:
+                logger.debug(
+                    f"      User {raw_user_id} has no access to row filter policies for {table_fqn}"
+                )
+                return []
+
+            # Build RowFilterInfo objects
+            row_filters = []
+            for f in filters:
+                attribute_name = f["attribute_name"]
+                allowed_values = f["allowed_values"]
+
+                # Check for wildcard
+                if "*" in allowed_values:
+                    # Wildcard means no filter
+                    logger.debug(
+                        f"      Skipping wildcard filter for attribute {attribute_name}"
+                    )
+                    continue
+
+                # Build SQL filter expression
+                values = [escape_sql_value(v) for v in allowed_values]
+                values_str = "', '".join(values)
+                filter_expression = f"{attribute_name} IN ('{values_str}')"
+
+                row_filters.append(
+                    RowFilterInfo(
+                        attribute_name=attribute_name,
+                        filter_expression=filter_expression,
+                    )
+                )
+
+            logger.debug(
+                f"      ✓ User {raw_user_id} has {len(row_filters)} row filters for {table_fqn}"
+            )
+            return row_filters
+
+        except Exception as e:
+            logger.warning(
+                f"      ✗ Failed to fetch row filters for {namespace_name}.{table_name}: {e}",
+                exc_info=True,
+            )
+            return []

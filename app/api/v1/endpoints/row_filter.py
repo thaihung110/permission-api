@@ -393,9 +393,10 @@ async def list_row_filter_policies(
         openfga = request.app.state.openfga
         service = RowFilterService(openfga)
 
-        # Get user's policies
+        # Get user's policies (with optional tenant)
+        tenant_id = getattr(request_data, "tenant_id", None)
         policies = await service.get_user_policies_for_table(
-            request_data.user_id, table_fqn
+            request_data.user_id, table_fqn, tenant_id
         )
 
         logger.info(

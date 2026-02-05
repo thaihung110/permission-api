@@ -4,8 +4,8 @@ type role
   relations
     # Relation Hierarchies
     define project: [project]
-    define assignee: [user, role#assignee] or ownership
-    define ownership: [user, role#assignee]
+    define assignee: [user, role#assignee, tenant#member] or ownership
+    define ownership: [user, role#assignee, tenant#member]
 
     # ------------------ Actions ------------------
     # Can assume a role

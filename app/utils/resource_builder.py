@@ -29,6 +29,7 @@ def _extract_resource_fields(
     Optional[str],
     Optional[str],
     Optional[str],
+    Optional[str],
 ]:
     """
     Extract resource fields handling both dict and object types.
@@ -37,7 +38,7 @@ def _extract_resource_fields(
         resource: Resource as dict or Pydantic model
 
     Returns:
-        Tuple of (catalog_name, schema_name, table_name, column_name, role_name, project_name)
+        Tuple of (catalog_name, schema_name, table_name, column_name, role_name, project_name, tenant_name)
     """
     # Handle dict type
     if isinstance(resource, dict):
@@ -47,6 +48,7 @@ def _extract_resource_fields(
         column_name = resource.get("column_name") or resource.get("column")
         role_name = resource.get("role_name") or resource.get("role")
         project_name = resource.get("project_name") or resource.get("project")
+        tenant_name = resource.get("tenant_name") or resource.get("tenant")
     else:
         # Handle object type (Pydantic model)
         catalog_name = getattr(resource, "catalog", None)
@@ -55,6 +57,7 @@ def _extract_resource_fields(
         column_name = getattr(resource, "column", None)
         role_name = getattr(resource, "role", None)
         project_name = getattr(resource, "project", None)
+        tenant_name = getattr(resource, "tenant", None)
 
     return (
         catalog_name,
@@ -63,6 +66,7 @@ def _extract_resource_fields(
         column_name,
         role_name,
         project_name,
+        tenant_name,
     )
 
 
@@ -110,7 +114,15 @@ def build_resource_identifiers(
         column_name,
         role_name,
         project_name,
+        tenant_name,
     ) = _extract_resource_fields(resource)
+
+    # Tenant-level permissions
+    if tenant_name:
+        object_id = f"tenant:{tenant_name}"
+        resource_type = "tenant"
+        resource_id = tenant_name
+        return object_id, resource_type, resource_id
 
     # Project-level permissions
     if project_name:

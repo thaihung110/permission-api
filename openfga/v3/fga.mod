@@ -11,3 +11,4 @@ contents:
   - components/lakekeeper_view.fga
   - components/row_filter_policy.fga
   - components/column.fga
+  - components/tenant.fga

@@ -185,6 +185,9 @@ class RowFilterPolicyListRequest(BaseModel):
     """Request model for listing row filter policies"""
 
     user_id: str = Field(..., description="User identifier")
+    tenant_id: Optional[str] = Field(
+        None, description="Optional tenant identifier"
+    )
     resource: Dict[str, str] = Field(
         ...,
         description="Resource specification with catalog_name, schema_name, table_name",
@@ -284,7 +287,10 @@ class RowFilterIdentityContext(BaseModel):
     """Identity context from Trino request"""
 
     user: str = Field(..., description="User identifier")
-    groups: List[str] = Field(default_factory=list, description="User groups")
+    groups: List[str] = Field(
+        default_factory=list,
+        description="List of tenant IDs that the user belongs to (mapped to tenants in OpenFGA)",
+    )
 
 
 class RowFilterContext(BaseModel):

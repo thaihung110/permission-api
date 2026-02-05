@@ -10,20 +10,20 @@ type project
     # Project Admin has two purposes:
     # 1. Lock-out protection: Checked to never be empty
     # 2. Granting new privileges, such as billing, which might require separate permissions / admin roles
-    define project_admin: [user, role#assignee] or operator from server
+    define project_admin: [user, role#assignee, tenant#member] or operator from server
     # Security Admins can manage all security aspects (grants, ownership) but not modify, create or access objects
-    define security_admin: [user, role#assignee] or project_admin
+    define security_admin: [user, role#assignee, tenant#member] or project_admin
     # Data Admins can manage all warehouse aspects but not grant privileges
-    define data_admin: [user, role#assignee] or project_admin
+    define data_admin: [user, role#assignee, tenant#member] or project_admin
     # Can create new roles - cannot add assignees to existing roles
-    define role_creator: [user, role#assignee] or security_admin
+    define role_creator: [user, role#assignee, tenant#member] or security_admin
 
     # ------------------ Assignable Privileges ------------------
     # Privileges relevant for the warehouse and sub-objects
-    define describe: [user, role#assignee] or select or create or data_admin or security_admin
-    define select: [user, role#assignee] or modify
-    define create: [user, role#assignee] or data_admin
-    define modify: [user, role#assignee] or project_admin
+    define describe: [user, role#assignee, tenant#member] or select or create or data_admin or security_admin
+    define select: [user, role#assignee, tenant#member] or modify
+    define create: [user, role#assignee, tenant#member] or data_admin
+    define modify: [user, role#assignee, tenant#member] or project_admin
 
     # ------------------ Actions ------------------
     # Get endpoint statistics for project endpoints and all warehouses under it

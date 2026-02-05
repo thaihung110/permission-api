@@ -4,4 +4,4 @@ type column # module: lakekeeper-column, column-level masking
     define parent: [lakekeeper_table]
     define select: [user, role#assignee] or select from parent
     # Relation used for explicit masking (mask-by-tuple; default is unmasked)
-    define mask: [user, role#assignee]
+    define mask: [user, role#assignee, tenant#member]

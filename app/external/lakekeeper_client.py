@@ -312,3 +312,45 @@ class LakekeeperClient:
                 exc_info=True,
             )
             return []
+
+    async def get_table_metadata(
+        self, warehouse_id: str, namespace_name: str, table_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        GET /v1/{warehouse_id}/namespaces/{namespace_name}/tables/{table_name}
+
+        Fetch table metadata including schema information (columns).
+
+        Args:
+            warehouse_id: Warehouse UUID
+            namespace_name: Namespace name
+            table_name: Table name
+
+        Returns:
+            Table metadata dict with 'metadata' containing 'schemas', or None on error
+        """
+        url = f"{self.catalog_url}/v1/{warehouse_id}/namespaces/{namespace_name}/tables/{table_name}"
+        logger.debug(f"Fetching table metadata: GET {url}")
+
+        try:
+            headers = await self._get_headers()
+            response = await self.client.get(url, headers=headers)
+            response.raise_for_status()
+
+            data = response.json()
+            logger.debug(
+                f"✓ Fetched table metadata for {namespace_name}.{table_name}"
+            )
+            return data
+
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                f"✗ Failed to fetch table metadata for {namespace_name}.{table_name} "
+                f"(HTTP {e.response.status_code}): {e.response.text}"
+            )
+            return None
+        except Exception as e:
+            logger.warning(
+                f"✗ Failed to fetch table metadata for {namespace_name}.{table_name}: {e}"
+            )
+            return None

@@ -88,6 +88,7 @@ async def trino_allow(
 
     operation = request_data.input.action.operation
     user_id = request_data.input.context.identity.user
+    groups = request_data.input.context.identity.groups
 
     # Pretty log the request
     request_dict = request_data.model_dump(mode="json", exclude_none=True)
@@ -97,11 +98,40 @@ async def trino_allow(
         f"{'='*60}\n"
         f"User: {user_id}\n"
         f"Operation: {operation}\n"
+        f"Groups (tenants): {groups}\n"
         f"Full Request:\n{json.dumps(request_dict, indent=2)}\n"
         f"{'='*60}"
     )
 
-    # Always allow certain operations
+    # CRITICAL: Verify tenant membership before processing
+    # Reject if groups is empty - user must belong to at least one tenant
+    if not groups:
+        logger.warning(
+            f"Access denied: User {user_id} has empty groups. "
+            "User must belong to at least one tenant."
+        )
+        return TrinoOpaResponse(result=False)
+
+    # Verify user has member relation to at least one tenant in groups
+    openfga = request.app.state.openfga
+    is_member_of_any_tenant = False
+    for tenant_id in groups:
+        is_member = await openfga.check_tenant_membership(user_id, tenant_id)
+        if is_member:
+            is_member_of_any_tenant = True
+            logger.info(
+                f"User {user_id} verified as member of tenant {tenant_id}"
+            )
+            break
+
+    if not is_member_of_any_tenant:
+        logger.warning(
+            f"Access denied: User {user_id} is not a member of any tenant in groups {groups}. "
+            "Membership verification failed in OpenFGA."
+        )
+        return TrinoOpaResponse(result=False)
+
+    # Always allow certain operations (after tenant verification)
     if operation in ALWAYS_ALLOW_OPERATIONS:
         response = TrinoOpaResponse(result=True)
         logger.info(
@@ -242,18 +272,46 @@ async def trino_batch(
 
     operation = request_data.input.action.operation
     user_id = request_data.input.context.identity.user
+    groups = request_data.input.context.identity.groups
     filter_resources = request_data.input.action.filterResources
 
     logger.info(
         f"[BATCH] Processing: user={user_id}, operation={operation}, "
-        f"resources_count={len(filter_resources)}"
+        f"resources_count={len(filter_resources)}, groups={groups}"
     )
+
+    # CRITICAL: Verify tenant membership before processing
+    # Reject if groups is empty - user must belong to at least one tenant
+    if not groups:
+        logger.warning(
+            f"Access denied: User {user_id} has empty groups. "
+            "User must belong to at least one tenant."
+        )
+        return TrinoBatchResponse(result=[])
+
+    # Verify user has member relation to at least one tenant in groups
+    openfga = request.app.state.openfga
+    is_member_of_any_tenant = False
+    for tenant_id in groups:
+        is_member = await openfga.check_tenant_membership(user_id, tenant_id)
+        if is_member:
+            is_member_of_any_tenant = True
+            logger.info(
+                f"User {user_id} verified as member of tenant {tenant_id}"
+            )
+            break
+
+    if not is_member_of_any_tenant:
+        logger.warning(
+            f"Access denied: User {user_id} is not a member of any tenant in groups {groups}. "
+            "Membership verification failed in OpenFGA."
+        )
+        return TrinoBatchResponse(result=[])
 
     allowed_indices: List[int] = []
     check_details = []  # Track details for logging
 
     try:
-        openfga = request.app.state.openfga
         service = PermissionService(openfga)
 
         # Map batch operation to individual operation

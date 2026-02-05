@@ -80,6 +80,7 @@ async def grant_permission(
         service = PermissionService(openfga)
         return await service.grant_permission(grant)
     except ValueError as e:
+        logger.warning(f"Invalid permission grant request: {e}")
         raise HTTPException(400, str(e))
     except Exception as e:
         logger.error(f"Error granting permission: {e}", exc_info=True)
@@ -102,6 +103,7 @@ async def revoke_permission(
         service = PermissionService(openfga)
         return await service.revoke_permission(revoke)
     except ValueError as e:
+        logger.warning(f"Invalid permission revoke request: {e}")
         raise HTTPException(400, str(e))
     except Exception as e:
         logger.error(f"Error revoking permission: {e}", exc_info=True)

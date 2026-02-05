@@ -119,18 +119,25 @@ class RowFilterService:
             return []
 
     async def get_user_policy_filters(
-        self, user_id: str, policy_ids: List[str]
+        self,
+        user_id: str,
+        policy_ids: List[str],
+        tenant_id: Optional[str] = None,
     ) -> List[dict]:
         """
         Get user's filters from all policies
 
-        This method checks both:
+        This method checks:
         1. Direct user permissions: user -> viewer -> policy
         2. Role-based permissions: role#assignee -> viewer -> policy (for roles the user is assigned to)
+        3. Tenant-based permissions: tenant#member -> viewer -> policy (if tenant_id is provided)
+
+        Note: Tenant membership is determined from 'groups' field in request, not from OpenFGA.
 
         Args:
             user_id: User identifier
             policy_ids: List of policy IDs
+            tenant_id: Optional tenant identifier (from groups in request)
 
         Returns:
             List of filter dicts with keys: policy_id, attribute_name, column_name, allowed_values
@@ -144,10 +151,15 @@ class RowFilterService:
         for policy_id in policy_ids:
             policy_object_id = f"row_filter_policy:{policy_id}"
 
-            # Build list of users to query (direct user + role usersets)
+            # Build list of users to query (direct user + role usersets + tenant)
             users_to_query = [f"user:{user_id}"]
             for role in user_roles:
                 users_to_query.append(f"role:{role}#assignee")
+
+            # Add tenant if provided (tenant membership is validated via groups in request)
+            if tenant_id:
+                users_to_query.append(f"tenant:{tenant_id}#member")
+                logger.debug(f"Checking policies for tenant {tenant_id}#member")
 
             for query_user in users_to_query:
                 try:
@@ -296,7 +308,7 @@ class RowFilterService:
             return []
 
     async def build_row_filter_sql(
-        self, user_id: str, table_fqn: str
+        self, user_id: str, table_fqn: str, tenant_id: Optional[str] = None
     ) -> Optional[str]:
         """
         Build SQL WHERE clause for row filtering
@@ -308,6 +320,7 @@ class RowFilterService:
         Args:
             user_id: User identifier
             table_fqn: Fully qualified table name (e.g., "prod.public.customers")
+            tenant_id: Optional tenant identifier
 
         Returns:
             SQL WHERE clause (e.g., "region IN ('north')") or None if no filter
@@ -321,8 +334,10 @@ class RowFilterService:
                 logger.debug(f"No policies found for table {table_fqn}")
                 return None
 
-            # Get user's filters
-            filters = await self.get_user_policy_filters(user_id, policy_ids)
+            # Get user's filters (including tenant-based if tenant_id provided)
+            filters = await self.get_user_policy_filters(
+                user_id, policy_ids, tenant_id
+            )
             if not filters:
                 # User has no access to any policies - this is OK, row filter is opt-in
                 # If user has select permission on table, they can see all rows
@@ -644,7 +659,7 @@ class RowFilterService:
         )
 
     async def get_user_policies_for_table(
-        self, user_id: str, table_fqn: str
+        self, user_id: str, table_fqn: str, tenant_id: Optional[str] = None
     ) -> List[RowFilterPolicyInfo]:
         """
         Get list of row filter policies that user has access to on a specific table
@@ -652,12 +667,13 @@ class RowFilterService:
         Args:
             user_id: User identifier
             table_fqn: Fully qualified table name (format: catalog.schema.table)
+            tenant_id: Optional tenant identifier
 
         Returns:
             List of RowFilterPolicyInfo objects
         """
         logger.info(
-            f"Getting row filter policies for user={user_id}, table={table_fqn}"
+            f"Getting row filter policies for user={user_id}, table={table_fqn}, tenant={tenant_id}"
         )
 
         try:
@@ -667,8 +683,10 @@ class RowFilterService:
                 logger.debug(f"No policies found for table {table_fqn}")
                 return []
 
-            # Get user's filters (this already checks access)
-            filters = await self.get_user_policy_filters(user_id, policy_ids)
+            # Get user's filters (including tenant-based if tenant_id provided)
+            filters = await self.get_user_policy_filters(
+                user_id, policy_ids, tenant_id
+            )
             if not filters:
                 logger.debug(
                     f"User {user_id} has no access to any policies for table {table_fqn}"
@@ -720,8 +738,40 @@ class RowFilterService:
         )
 
         try:
-            # Extract user_id from context
+            # Extract user_id and groups (tenants) from context
             user_id = request.input.context.identity.user
+            groups = request.input.context.identity.groups  # List of tenant IDs
+
+            # CRITICAL: Verify user is member of at least one tenant in groups
+            # Reject if groups is empty - user must belong to at least one tenant
+            if not groups:
+                logger.warning(
+                    f"Access denied: User {user_id} has empty groups. "
+                    "User must belong to at least one tenant."
+                )
+                # REJECT - no tenants in groups
+                return BatchRowFilterResponse(result=[])
+
+            # Check membership in OpenFGA, don't trust the request
+            is_member_of_any_tenant = False
+            for tenant_id in groups:
+                is_member = await self.openfga.check_tenant_membership(
+                    user_id, tenant_id
+                )
+                if is_member:
+                    is_member_of_any_tenant = True
+                    logger.info(
+                        f"User {user_id} verified as member of tenant {tenant_id}"
+                    )
+                    break  # Found at least one membership
+
+            if not is_member_of_any_tenant:
+                logger.warning(
+                    f"Access denied: User {user_id} is not a member of any tenant in groups {groups}. "
+                    "Membership verification failed in OpenFGA."
+                )
+                # REJECT - user doesn't belong to any tenant
+                return BatchRowFilterResponse(result=[])
 
             # Validate operation
             if request.input.action.operation != "GetRowFilters":
@@ -735,11 +785,46 @@ class RowFilterService:
             table_fqn = f"{table_resource.catalogName}.{table_resource.schemaName}.{table_resource.tableName}"
 
             logger.debug(
-                f"Processing row filter request: user={user_id}, table={table_fqn}"
+                f"Processing row filter request: user={user_id}, table={table_fqn}, "
+                f"tenants(groups)={groups}"
             )
 
-            # Build row filter SQL using existing method
-            filter_sql = await self.build_row_filter_sql(user_id, table_fqn)
+            # Build row filter SQL for each tenant in groups
+            # If user belongs to multiple tenants, we need to check all of them
+            filter_sqls = []
+
+            # First, check direct user permissions (without tenant)
+            user_filter = await self.build_row_filter_sql(
+                user_id, table_fqn, None
+            )
+            if user_filter:
+                filter_sqls.append(user_filter)
+                logger.info(f"Found direct user filter for {user_id}")
+
+            # Then, check each tenant in groups
+            for tenant_id in groups:
+                tenant_filter = await self.build_row_filter_sql(
+                    user_id, table_fqn, tenant_id
+                )
+                if tenant_filter:
+                    filter_sqls.append(tenant_filter)
+                    logger.info(
+                        f"Found tenant filter for {user_id} via tenant {tenant_id}"
+                    )
+
+            # Combine all filters with OR logic
+            # If user has access via multiple tenants, any condition satisfies
+            if filter_sqls:
+                if len(filter_sqls) == 1:
+                    filter_sql = filter_sqls[0]
+                else:
+                    # Wrap each filter in parentheses and OR them
+                    filter_sql = " OR ".join([f"({f})" for f in filter_sqls])
+                logger.info(
+                    f"Combined filter from {len(filter_sqls)} sources: {filter_sql}"
+                )
+            else:
+                filter_sql = None
 
             # Build response
             result = []

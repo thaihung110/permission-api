@@ -34,22 +34,22 @@ async def grant_column_mask(
     Example:
         POST /column-mask/grant
         {
-          "user_id": "analyst",
-          "resource": {
-            "catalog": "lakekeeper_bronze",
-            "schema": "finance",
-            "table": "user",
-            "column": "email"
-          }
-        }
+            "user_id": "analyst",
+            "resource": {
+                "catalog": "lakekeeper_bronze",
+                "schema": "finance",
+                "table": "user",
+                "column": "email"
+            }
+            }
 
-    Response:
-        {
-          "success": true,
-          "user_id": "analyst",
-          "column_id": "lakekeeper_bronze.finance.user.email",
-          "object_id": "column:lakekeeper_bronze.finance.user.email",
-          "relation": "mask"
+        Response:
+            {
+            "success": true,
+            "user_id": "analyst",
+            "column_id": "lakekeeper_bronze.finance.user.email",
+            "object_id": "column:lakekeeper_bronze.finance.user.email",
+            "relation": "mask"
         }
     """
     try:
@@ -149,20 +149,20 @@ async def list_masked_columns(
     Example:
         POST /column-mask/list
         {
-          "user_id": "analyst",
-          "resource": {
-            "catalog_name": "lakekeeper_bronze",
-            "schema_name": "finance",
-            "table_name": "user"
-          }
-        }
+            "user_id": "analyst",
+            "resource": {
+                "catalog_name": "lakekeeper_bronze",
+                "schema_name": "finance",
+                "table_name": "user"
+            }
+            }
 
-    Response:
-        {
-          "user_id": "analyst",
-          "table_fqn": "lakekeeper_bronze.finance.user",
-          "masked_columns": ["email", "phone_number"],
-          "count": 2
+        Response:
+            {
+            "user_id": "analyst",
+            "table_fqn": "lakekeeper_bronze.finance.user",
+            "masked_columns": ["email", "phone_number"],
+            "count": 2
         }
     """
     table_fqn = ""  # Initialize for exception handling
@@ -194,9 +194,10 @@ async def list_masked_columns(
         openfga = request.app.state.openfga
         service = ColumnMaskService(openfga)
 
-        # Get masked columns
+        # Get masked columns (with optional tenant)
+        tenant_id = getattr(request_data, "tenant_id", None)
         masked_columns = await service.get_masked_columns_for_user(
-            request_data.user_id, table_fqn
+            request_data.user_id, table_fqn, tenant_id
         )
 
         logger.info(
@@ -240,40 +241,40 @@ async def batch_check_column_masks(
     Example:
         POST /column-mask/query
         {
-          "input": {
-            "context": {
-              "identity": {
-                "user": "hung",
-                "groups": []
-              }
-            },
-            "action": {
-              "operation": "GetColumnMask",
-              "filterResources": [
-                {
-                  "column": {
-                    "catalogName": "lakekeeper_bronze",
-                    "schemaName": "finance",
-                    "tableName": "user",
-                    "columnName": "phone_number",
-                    "columnType": "varchar"
-                  }
+            "input": {
+                "context": {
+                "identity": {
+                    "user": "hung",
+                    "groups": []
                 }
-              ]
+                },
+                "action": {
+                "operation": "GetColumnMask",
+                "filterResources": [
+                    {
+                    "column": {
+                        "catalogName": "lakekeeper_bronze",
+                        "schemaName": "finance",
+                        "tableName": "user",
+                        "columnName": "phone_number",
+                        "columnType": "varchar"
+                    }
+                    }
+                ]
+                }
             }
-          }
-        }
+            }
 
-    Response:
-        {
-          "result": [
+        Response:
             {
-              "index": 0,
-              "viewExpression": {
-                "expression": "******"
-              }
-            }
-          ]
+            "result": [
+                {
+                "index": 0,
+                "viewExpression": {
+                    "expression": "******"
+                }
+                }
+            ]
         }
     """
     import json

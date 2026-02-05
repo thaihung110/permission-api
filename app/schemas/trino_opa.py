@@ -23,7 +23,10 @@ class TrinoIdentity(BaseModel):
     user: str = Field(
         ..., description="User identifier (can be UUID or username)"
     )
-    groups: List[str] = Field(default_factory=list, description="User groups")
+    groups: List[str] = Field(
+        default_factory=list,
+        description="List of tenant IDs that the user belongs to. User must be member of at least one tenant.",
+    )
 
 
 class TrinoSoftwareStack(BaseModel):

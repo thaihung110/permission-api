@@ -10,12 +10,12 @@ type server
     # In order to perform actions inside projects, the admin can assign himself
     # as `project_admin` on each project. This action is visible in the audit log.
     # The admin role is designed for human users.
-    define admin: [user, role#assignee]
+    define admin: [user, role#assignee, tenant#member]
 
     # Operators are more powerful than administrators - they are the most powerful role in
     # Lakekeeper. The operator role allows usage of all APIs inside the catalog. It is designed
     # to be used by machines that provision resources inside Lakekeeper, i.e. a `KubernetesOperator`
-    define operator: [user, role#assignee]
+    define operator: [user, role#assignee, tenant#member]
 
     # ------------------ Actions ------------------
     define can_create_project: admin or operator

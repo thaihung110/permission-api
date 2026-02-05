@@ -25,30 +25,43 @@ async def list_resources(
     then checks which permissions [create, modify, select, describe]
     the specified user has on each resource.
 
-    Returns all resources including those where the user has no permissions
-    (indicated by empty permission list).
+    Returns all resources in a nested structure: warehouse -> namespaces -> tables -> columns.
 
     **Request:**
     - `user_id`: User ID to check permissions for
-    - `catalog`: Warehouse name (catalog name) to list resources for
+    - `catalog`: Trino catalog name (e.g., 'lakekeeper_demo').
+                    The 'lakekeeper_' prefix will be removed to get the Lakekeeper warehouse name.
 
-    **Response format:**
-    - Key: resource path
-      - Warehouse: `catalog`
-      - Namespace: `catalog.namespace_name`
-      - Table: `catalog.namespace_name.table_name`
-    - Value: list of permissions the user has on that resource
+        **Response format:**
+        Nested structure with permissions at each level:
+        - Warehouse: contains permissions and map of namespaces
+        - Namespace: contains permissions and map of tables
+        - Table: contains permissions and list of columns
+        - Column: contains name and masked status
 
-    **Example:**
-    ```json
-    {
-      "resources": {
-        "demo": ["select", "describe"],
-        "demo.finance": ["select", "modify"],
-        "demo.finance.user": ["select"],
-        "demo.sales": []
-      },
-      "errors": []
+        **Example:**
+        ```json
+        {
+        "resources": {
+            "lakekeeper_demo": {
+            "permissions": ["select", "describe"],
+            "namespaces": {
+                "finance": {
+                "permissions": ["select", "modify"],
+                "tables": {
+                    "user": {
+                    "permissions": ["select"],
+                    "columns": [
+                        {"name": "id", "masked": false},
+                        {"name": "phone_number", "masked": true}
+                    ]
+                    }
+                }
+                }
+            }
+            }
+        },
+        "errors": []
     }
     ```
     """
@@ -57,7 +70,7 @@ async def list_resources(
         f"[ENDPOINT] POST /lakekeeper/list-resources\n"
         f"Request body: {request_data.model_dump()}\n"
         f"User ID: {request_data.user_id}\n"
-        f"Catalog: {request_data.catalog}\n"
+        f"Catalog (Trino): {request_data.catalog}\n"
         f"{'='*60}"
     )
 
@@ -80,30 +93,35 @@ async def list_resources(
         )
 
         # Log summary
-        resources_with_permissions = {
-            k: v for k, v in result.resources.items() if v
-        }
-        resources_without_permissions = {
-            k: v for k, v in result.resources.items() if not v
-        }
+        total_warehouses = len(result.resources)
+        total_namespaces = sum(
+            len(wh.namespaces) if wh.namespaces else 0
+            for wh in result.resources.values()
+        )
+        total_tables = sum(
+            len(ns.tables) if ns.tables else 0
+            for wh in result.resources.values()
+            if wh.namespaces
+            for ns in wh.namespaces.values()
+        )
 
         logger.info(
             f"\n{'='*60}\n"
             f"[ENDPOINT] Request completed successfully\n"
             f"Summary:\n"
-            f"  - Total resources: {len(result.resources)}\n"
-            f"  - Resources with permissions: {len(resources_with_permissions)}\n"
-            f"  - Resources without permissions: {len(resources_without_permissions)}\n"
+            f"  - Warehouses: {total_warehouses}\n"
+            f"  - Namespaces: {total_namespaces}\n"
+            f"  - Tables: {total_tables}\n"
             f"  - Errors encountered: {len(result.errors) if result.errors else 0}\n"
             f"{'='*60}"
         )
 
         # Log detailed response (truncated for large responses)
-        if len(result.resources) <= 50:
+        if total_tables <= 20:
             logger.debug(f"[ENDPOINT] Response: {result.model_dump()}")
         else:
             logger.debug(
-                f"[ENDPOINT] Response contains {len(result.resources)} resources "
+                f"[ENDPOINT] Response contains {total_tables} tables "
                 f"(too large to log in full)"
             )
 

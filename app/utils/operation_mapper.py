@@ -100,6 +100,7 @@ def build_user_identifier_with_type(
                 - '<id>' (plain) - prefixed with 'user:'
             - user_type='userset':
                 - 'role:<role_name>#<relation>' (e.g., 'role:DE#assignee') - returned as-is
+                - 'tenant:<tenant_name>#<relation>' (e.g., 'tenant:viettel#member') - returned as-is
         user_type: Type of user identifier ('user' or 'userset')
 
     Returns:
@@ -109,13 +110,26 @@ def build_user_identifier_with_type(
         ValueError: If user_type is 'userset' but format is invalid
     """
     if user_type == "userset":
-        # Userset format: role:<role_name>#<relation>
+        # Userset format: role:<role_name>#<relation> or tenant:<tenant_name>#<relation>
         # Validate format
-        if not user_id.startswith("role:") or "#" not in user_id:
+        if "#" not in user_id:
             raise ValueError(
                 f"Invalid userset format: '{user_id}'. "
-                "Expected format: 'role:<role_name>#<relation>' (e.g., 'role:DE#assignee')"
+                "Expected format: 'role:<role_name>#<relation>' (e.g., 'role:DE#assignee') "
+                "or 'tenant:<tenant_name>#<relation>' (e.g., 'tenant:viettel#member')"
             )
+
+        # Check if it starts with valid userset type
+        valid_userset_types = ["role:", "tenant:"]
+        if not any(
+            user_id.startswith(prefix) for prefix in valid_userset_types
+        ):
+            raise ValueError(
+                f"Invalid userset format: '{user_id}'. "
+                "Expected format: 'role:<role_name>#<relation>' (e.g., 'role:DE#assignee') "
+                "or 'tenant:<tenant_name>#<relation>' (e.g., 'tenant:viettel#member')"
+            )
+
         return user_id
 
     # user_type == "user" (default)

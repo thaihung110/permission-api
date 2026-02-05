@@ -8,7 +8,7 @@ services:
       - POSTGRES_DB=openfga_db
       - PGDATA=/var/lib/postgresql/data/pgdata
     volumes:
-      - openfga-db-data:/var/lib/postgresql/data
+      - ./data/openfga-db:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U openfga_admin -p 5432 -d openfga_db"]
       interval: 20s
@@ -99,9 +99,6 @@ services:
     networks:
       - iceberg_net
     restart: no
-
-volumes:
-  openfga-db-data:
 
 networks:
   iceberg_net:

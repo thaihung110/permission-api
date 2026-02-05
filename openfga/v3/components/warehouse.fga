@@ -7,17 +7,17 @@ type warehouse
     define namespace: [namespace]
 
     # ------------------ Special roles ------------------
-    define ownership: [user, role#assignee]
-    define managed_access: [user:*, role:*]
+    define ownership: [user, role#assignee, tenant#member]
+    define managed_access: [user:*, role:*, tenant:*]
     define managed_access_inheritance: managed_access
 
     # ------------------ Assignable Privileges ------------------
-    define pass_grants: [user, role#assignee]
-    define manage_grants: [user, role#assignee] or ownership or security_admin from project
-    define describe: [user, role#assignee] or ownership or select or create or describe from project
-    define select: [user, role#assignee] or ownership or modify or select from project
-    define create: [user, role#assignee] or ownership or create from project
-    define modify: [user, role#assignee] or ownership or modify from project or data_admin from project
+    define pass_grants: [user, role#assignee, tenant#member]
+    define manage_grants: [user, role#assignee, tenant#member] or ownership or security_admin from project
+    define describe: [user, role#assignee, tenant#member] or ownership or select or create or describe from project
+    define select: [user, role#assignee, tenant#member] or ownership or modify or select from project
+    define create: [user, role#assignee, tenant#member] or ownership or create from project
+    define modify: [user, role#assignee, tenant#member] or ownership or modify from project or data_admin from project
 
     # ------------------ Actions ------------------
     define can_create_namespace: create

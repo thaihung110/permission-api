@@ -7,17 +7,17 @@ type namespace
     define child: [namespace, lakekeeper_table, lakekeeper_view]
 
     # ------------------ Special roles ------------------
-    define ownership: [user, role#assignee]
-    define managed_access: [user:*, role:*]
+    define ownership: [user, role#assignee, tenant#member]
+    define managed_access: [user:*, role:*, tenant:*]
     define managed_access_inheritance: managed_access or managed_access_inheritance from parent
 
     # ------------------ Assignable Privileges ------------------
-    define pass_grants: [user, role#assignee]
-    define manage_grants: [user, role#assignee] or (ownership but not managed_access_inheritance from parent) or manage_grants from parent
-    define describe: [user, role#assignee] or ownership or select or create or describe from parent
-    define select: [user, role#assignee] or ownership or modify or select from parent
-    define create: [user, role#assignee] or ownership or create from parent
-    define modify: [user, role#assignee] or ownership or modify from parent
+    define pass_grants: [user, role#assignee, tenant#member]
+    define manage_grants: [user, role#assignee, tenant#member] or (ownership but not managed_access_inheritance from parent) or manage_grants from parent
+    define describe: [user, role#assignee, tenant#member] or ownership or select or create or describe from parent
+    define select: [user, role#assignee, tenant#member] or ownership or modify or select from parent
+    define create: [user, role#assignee, tenant#member] or ownership or create from parent
+    define modify: [user, role#assignee, tenant#member] or ownership or modify from parent
 
     # ------------------ Actions ------------------
     define can_create_table: create

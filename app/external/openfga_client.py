@@ -379,3 +379,42 @@ class OpenFGAManager:
         except Exception as e:
             logger.error(f"Error listing objects from OpenFGA: {e}")
             raise
+
+    # ========================================================================
+    # Tenant Operations
+    # ========================================================================
+
+    async def check_tenant_membership(
+        self, user_id: str, tenant_id: str
+    ) -> bool:
+        """
+        Check if a user is a member of a tenant
+
+        Args:
+            user_id: User identifier (without "user:" prefix)
+            tenant_id: Tenant identifier (without "tenant:" prefix)
+
+        Returns:
+            True if user is a member of the tenant, False otherwise
+
+        Example:
+            is_member = await openfga.check_tenant_membership("alice", "acme_corp")
+        """
+        try:
+            # Query: user -> member -> tenant
+            is_member = await self.check_permission(
+                user=f"user:{user_id}",
+                relation="member",
+                object_id=f"tenant:{tenant_id}",
+            )
+            logger.debug(
+                f"User {user_id} membership in tenant {tenant_id}: {is_member}"
+            )
+            return is_member
+
+        except Exception as e:
+            logger.warning(
+                f"Error checking tenant membership for user {user_id} "
+                f"and tenant {tenant_id}: {e}"
+            )
+            return False
