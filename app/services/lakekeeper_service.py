@@ -34,15 +34,14 @@ logger = logging.getLogger(__name__)
 class LakekeeperService:
     """Service for handling Lakekeeper resource operations"""
 
-    # Permissions to check for each resource
-    PERMISSIONS = ["create", "modify", "select", "describe"]
-
-    # OpenFGA resource types
-    RESOURCE_TYPES = [
-        FGA_TYPE_WAREHOUSE,
-        FGA_TYPE_NAMESPACE,
-        FGA_TYPE_LAKEKEEPER_TABLE,
-    ]
+    # Permissions to check for each resource type
+    WAREHOUSE_PERMISSIONS = ["create", "modify", "select", "describe"]
+    NAMESPACE_PERMISSIONS = ["create", "modify", "select", "describe"]
+    TABLE_PERMISSIONS = [
+        "modify",
+        "select",
+        "describe",
+    ]  # Table không có create
 
     def __init__(
         self,
@@ -106,16 +105,10 @@ class LakekeeperService:
             f"  - Catalog name (OpenFGA): {catalog_name}"
         )
 
-        # Step 1: Pre-fetch all permissions from OpenFGA using list_objects()
-        # This is much more efficient than checking each resource individually
-        logger.info("STEP 1: Pre-fetching all permissions from OpenFGA...")
-        permission_cache = await self._build_permission_cache(user)
-
-        total_permissions = sum(
-            len(objects) for objects in permission_cache.values()
-        )
+        # Note: We use check_permission instead of list_objects for accuracy
+        # This ensures we get all inherited and derived permissions correctly
         logger.info(
-            f"✓ Built permission cache with {total_permissions} total object permissions"
+            "Using direct permission checks for accurate inheritance resolution"
         )
 
         # Step 2: Get warehouse_id from catalog config using warehouse_name
@@ -152,15 +145,19 @@ class LakekeeperService:
             f"========================================"
         )
 
-        # Get warehouse permissions from cache
+        # Check warehouse permissions directly
         warehouse_object_id = build_fga_catalog_object_id(catalog_name)
-        warehouse_permissions = self._get_permissions_from_cache(
-            warehouse_object_id, permission_cache
+        warehouse_permissions = await self._check_permissions(
+            user, warehouse_object_id, self.WAREHOUSE_PERMISSIONS
         )
         # Use catalog_name in response (lakekeeper_demo) instead of catalog (demo)
         logger.info(
             f"✓ Warehouse '{catalog_name}' permissions: {warehouse_permissions}"
         )
+
+        # Store warehouse permissions for cascading to children
+        # (since OpenFGA parent tuples may not exist)
+        inherited_from_warehouse = set(warehouse_permissions)
 
         # Step 3: Fetch namespaces for this warehouse
         logger.info(f"Fetching namespaces for warehouse: {warehouse_name}")
@@ -194,16 +191,29 @@ class LakekeeperService:
                 f"  Processing namespace: {resource_path}"
             )
 
-            # Get namespace permissions from cache
+            # Check namespace permissions directly
             namespace_object_id = build_fga_schema_object_id(
                 catalog_name, namespace_name
             )
-            namespace_permissions = self._get_permissions_from_cache(
-                namespace_object_id, permission_cache
+            namespace_permissions_direct = await self._check_permissions(
+                user, namespace_object_id, self.NAMESPACE_PERMISSIONS
             )
+
+            # Cascade permissions from warehouse to namespace
+            namespace_permissions = list(
+                set(namespace_permissions_direct) | inherited_from_warehouse
+            )
+
             logger.info(
                 f"  ✓ Namespace '{resource_path}' permissions: {namespace_permissions}"
             )
+            if namespace_permissions_direct != namespace_permissions:
+                logger.debug(
+                    f"    (inherited from warehouse: {list(inherited_from_warehouse - set(namespace_permissions_direct))})"
+                )
+
+            # Store for cascading to tables
+            inherited_from_namespace = set(namespace_permissions)
 
             # Build nested structure for tables as list
             tables_list = []
@@ -236,13 +246,27 @@ class LakekeeperService:
                         f"    [{table_idx}/{len(tables)}] Processing table: {table_resource_path}"
                     )
 
-                    # Get table permissions from cache
+                    # Check table permissions directly (no create for tables)
                     table_object_id = build_fga_table_object_id(
                         catalog_name, namespace_name, table_name
                     )
-                    table_permissions = self._get_permissions_from_cache(
-                        table_object_id, permission_cache
+                    table_permissions_direct = await self._check_permissions(
+                        user, table_object_id, self.TABLE_PERMISSIONS
                     )
+
+                    # Cascade permissions from namespace to table (excluding 'create')
+                    inherited_from_namespace_for_table = (
+                        inherited_from_namespace - {"create"}
+                    )
+                    table_permissions = list(
+                        set(table_permissions_direct)
+                        | inherited_from_namespace_for_table
+                    )
+
+                    if table_permissions_direct != table_permissions:
+                        logger.debug(
+                            f"      (inherited from parent: {list(inherited_from_namespace_for_table - set(table_permissions_direct))})"
+                        )
 
                     # Fetch table metadata and process columns
                     columns = await self._fetch_and_process_columns(
@@ -316,8 +340,42 @@ class LakekeeperService:
             errors=errors if errors else None,
         )
 
+    async def _check_permissions(
+        self, user: str, object_id: str, permissions: List[str]
+    ) -> List[str]:
+        """
+        Check which permissions the user has on a specific resource using check_permission.
+        This ensures we get all inherited and derived permissions correctly.
+
+        Args:
+            user: User identifier (format: "user:userid")
+            object_id: OpenFGA object ID (e.g., "warehouse:lakekeeper_demo")
+            permissions: List of permissions to check (e.g., ["create", "modify", "select", "describe"])
+
+        Returns:
+            List of granted permissions
+        """
+        granted = []
+
+        for permission in permissions:
+            try:
+                has_permission = await self.openfga.check_permission(
+                    user=user,
+                    relation=permission,
+                    object_id=object_id,
+                )
+                if has_permission:
+                    granted.append(permission)
+            except Exception as e:
+                logger.debug(
+                    f"Failed to check {permission} on {object_id} for {user}: {e}"
+                )
+
+        return granted
+
     async def _build_permission_cache(self, user: str) -> Dict[str, Set[str]]:
         """
+        [DEPRECATED - Not used anymore, kept for reference]
         Build a cache of all permissions for the user using list_objects()
 
         This is much more efficient than checking each resource individually,
